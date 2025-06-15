@@ -1,25 +1,21 @@
 <?php
 /**
- * LOGOUT - Disconnessione Utente
+ * LOGOUT.PHP - Gestione Logout
  * CRM Re.De Consulting
  * 
- * Gestisce il logout e redirect al login
+ * Disconnette l'utente e redirect al login
  */
 
 define('AUTH_INIT', true);
 require_once 'config.php';
 require_once 'Auth.php';
 
+// Ottieni istanza Auth
 $auth = Auth::getInstance();
 
 // Esegui logout
-$result = $auth->logout();
+$auth->logout();
 
 // Redirect al login con messaggio
-if ($result['success']) {
-    header('Location: ' . LOGIN_URL . '?logout=1');
-} else {
-    header('Location: ' . LOGIN_URL . '?error=logout_failed');
-}
+header('Location: ' . LOGIN_URL . '?logout=1');
 exit;
-?>

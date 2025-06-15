@@ -1,44 +1,45 @@
 <?php
 /**
- * CHECK AUTH API - Verifica Stato Autenticazione
+ * CHECK.PHP - API Verifica Autenticazione
  * CRM Re.De Consulting
  * 
- * Endpoint AJAX per verificare se utente è autenticato
- * Restituisce JSON con stato e info utente
+ * Endpoint AJAX per verificare stato autenticazione
+ * Ritorna JSON con stato e info utente
  */
 
 define('AUTH_INIT', true);
 require_once 'config.php';
 require_once 'Auth.php';
 
-// Header JSON
+// Imposta header JSON
 header('Content-Type: application/json');
 header('Cache-Control: no-cache, no-store, must-revalidate');
 
+// Ottieni istanza Auth
 $auth = Auth::getInstance();
+
+// Prepara risposta
+$response = [
+    'authenticated' => false,
+    'user' => null,
+    'session_remaining' => 0
+];
 
 // Verifica autenticazione
 if ($auth->isAuthenticated()) {
-    $user = $auth->getCurrentUser();
+    $response['authenticated'] = true;
+    $response['user'] = $auth->getCurrentUser();
     
     // Calcola tempo rimanente sessione
-    $loginTime = $_SESSION['auth_login_time'] ?? time();
-    $elapsed = time() - $loginTime;
-    $remaining = AUTH_SESSION_LIFETIME - $elapsed;
+    if (isset($_SESSION['last_activity'])) {
+        $elapsed = time() - $_SESSION['last_activity'];
+        $remaining = AUTH_SESSION_LIFETIME - $elapsed;
+        $response['session_remaining'] = max(0, $remaining);
+    }
     
-    echo json_encode([
-        'authenticated' => true,
-        'user' => $user,
-        'session' => [
-            'remaining_seconds' => max(0, $remaining),
-            'expires_at' => $loginTime + AUTH_SESSION_LIFETIME
-        ]
-    ]);
-} else {
-    http_response_code(401);
-    echo json_encode([
-        'authenticated' => false,
-        'message' => AUTH_MSG_NOT_AUTHENTICATED
-    ]);
+    // Aggiorna ultima attività
+    $_SESSION['last_activity'] = time();
 }
-?>
+
+// Output JSON
+echo json_encode($response, JSON_PRETTY_PRINT);

@@ -31,7 +31,6 @@ Assicurarsi che:
 │   ├── check.php         # API verifica auth (AJAX)
 │   ├── install.sql       # Script creazione tabelle
 │   ├── .htaccess         # Protezione directory auth
-│   ├── .env.example      # Esempio configurazione
 │   └── README.md         # Questo file
 └── index.php             ← Entry point CRM principale
 ```

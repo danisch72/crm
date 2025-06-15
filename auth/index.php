@@ -12,4 +12,3 @@ require_once 'config.php';
 // Redirect al login
 header('Location: ' . LOGIN_URL);
 exit;
-?>

@@ -88,18 +88,17 @@ switch ($action) {
                 showError('Modulo non trovato: ' . $action);
             }
         } else {
-            // Azione non riconosciuta - redirect a dashboard
-            header('Location: ?action=dashboard');
-            exit;
+            showError('Azione non valida: ' . $action);
         }
+        break;
 }
 
 // ================================================================
-// FUNZIONI UTILITY
+// FUNZIONI HELPER
 // ================================================================
 
 /**
- * Mostra pagina di errore
+ * Mostra errore generico
  */
 function showError($message) {
     ?>
@@ -107,64 +106,51 @@ function showError($message) {
     <html lang="it">
     <head>
         <meta charset="UTF-8">
-        <meta name="viewport" content="width=device-width, initial-scale=1.0">
-        <title>Errore - CRM Re.De</title>
+        <title>Errore - CRM Re.De Consulting</title>
         <style>
             body {
                 font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-                background: #f3f4f6;
-                margin: 0;
-                padding: 0;
+                background: #f5f7f9;
                 display: flex;
                 align-items: center;
                 justify-content: center;
                 min-height: 100vh;
+                margin: 0;
             }
-            .error-container {
+            .error-box {
                 background: white;
-                padding: 2rem;
+                padding: 40px;
                 border-radius: 8px;
-                box-shadow: 0 2px 4px rgba(0,0,0,0.1);
-                max-width: 500px;
+                box-shadow: 0 2px 8px rgba(0,0,0,0.1);
                 text-align: center;
-            }
-            .error-icon {
-                font-size: 3rem;
-                margin-bottom: 1rem;
+                max-width: 500px;
             }
             h1 {
-                color: #E60012;
-                margin-bottom: 0.5rem;
+                color: #dc2626;
+                margin-bottom: 20px;
             }
             p {
-                color: #6b7280;
-                margin-bottom: 1.5rem;
+                color: #666;
+                margin-bottom: 30px;
             }
-            .btn {
-                display: inline-block;
-                padding: 0.75rem 1.5rem;
-                background: #007849;
-                color: white;
+            a {
+                color: #007849;
                 text-decoration: none;
-                border-radius: 6px;
-                font-weight: 500;
-                transition: background 0.2s;
+                font-weight: 600;
             }
-            .btn:hover {
-                background: #005a37;
+            a:hover {
+                text-decoration: underline;
             }
         </style>
     </head>
     <body>
-        <div class="error-container">
-            <div class="error-icon">⚠️</div>
+        <div class="error-box">
             <h1>Errore</h1>
             <p><?= htmlspecialchars($message) ?></p>
-            <a href="?action=dashboard" class="btn">Torna alla Dashboard</a>
+            <a href="<?= CRM_BASE_URL ?>">Torna alla Dashboard</a>
         </div>
     </body>
     </html>
     <?php
     exit;
 }
-?>

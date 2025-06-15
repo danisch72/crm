@@ -1,9 +1,9 @@
 <?php
 /**
- * LOGIN FORM - Sistema Autenticazione
+ * LOGIN.PHP - Pagina Login Sistema Autenticazione
  * CRM Re.De Consulting
  * 
- * Form login minimalista senza tracking ore
+ * Form login con design Datev Koinos
  */
 
 define('AUTH_INIT', true);
@@ -18,26 +18,24 @@ if ($auth->isAuthenticated()) {
     exit;
 }
 
-// Genera token CSRF
-$csrfToken = $auth->generateCSRFToken();
-
-// Gestione POST login
 $error = '';
-$success = '';
+$email = '';
 
+// Gestione form POST
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
+    $email = $_POST['email'] ?? '';
+    $password = $_POST['password'] ?? '';
+    $csrf_token = $_POST['csrf_token'] ?? '';
+    
     // Verifica CSRF
-    if (!isset($_POST['csrf_token']) || !$auth->verifyCSRFToken($_POST['csrf_token'])) {
-        $error = 'Token di sicurezza non valido';
+    if (!$auth->verifyCSRFToken($csrf_token)) {
+        $error = 'Token di sicurezza non valido. Ricarica la pagina.';
     } else {
         // Tenta login
-        $email = $_POST['email'] ?? '';
-        $password = $_POST['password'] ?? '';
-        
         $result = $auth->login($email, $password);
         
         if ($result['success']) {
-            // Login riuscito - redirect
+            // Redirect a dashboard
             header('Location: ' . DASHBOARD_URL);
             exit;
         } else {
@@ -46,15 +44,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     }
 }
 
-// Messaggio da logout
-if (isset($_GET['logout']) && $_GET['logout'] == '1') {
-    $success = 'Disconnessione avvenuta con successo';
-}
-
-// Messaggio sessione scaduta
-if (isset($_GET['expired']) && $_GET['expired'] == '1') {
-    $error = 'Sessione scaduta, effettua nuovamente il login';
-}
+// Genera nuovo token CSRF
+$csrf_token = $auth->generateCSRFToken();
 ?>
 <!DOCTYPE html>
 <html lang="it">
@@ -62,291 +53,311 @@ if (isset($_GET['expired']) && $_GET['expired'] == '1') {
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Login - CRM Re.De Consulting</title>
+    
     <style>
-        /* Reset e variabili */
+        /* Reset e base */
         * {
             margin: 0;
             padding: 0;
             box-sizing: border-box;
         }
         
-        :root {
-            --primary: #007849;
-            --primary-dark: #005a37;
-            --secondary: #86B817;
-            --danger: #E60012;
-            --success: #28a745;
-            --gray-50: #f9fafb;
-            --gray-100: #f3f4f6;
-            --gray-200: #e5e7eb;
-            --gray-300: #d1d5db;
-            --gray-500: #6b7280;
-            --gray-700: #374151;
-            --gray-900: #111827;
-            --shadow: 0 10px 15px -3px rgb(0 0 0 / 0.1);
-            --shadow-sm: 0 1px 2px 0 rgb(0 0 0 / 0.05);
-        }
-        
         body {
-            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-            background: linear-gradient(135deg, var(--primary) 0%, var(--secondary) 100%);
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+            background: #f5f7f9;
+            color: #333;
+            line-height: 1.6;
             min-height: 100vh;
             display: flex;
             align-items: center;
             justify-content: center;
-            padding: 1rem;
         }
         
+        /* Container login */
         .login-container {
+            width: 100%;
+            max-width: 420px;
+            padding: 20px;
+        }
+        
+        /* Card login */
+        .login-card {
             background: white;
             border-radius: 12px;
-            box-shadow: var(--shadow);
-            width: 100%;
-            max-width: 400px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.08), 0 4px 12px rgba(0,0,0,0.04);
             overflow: hidden;
         }
         
+        /* Header */
         .login-header {
-            background: var(--primary);
+            background: #007849; /* Verde Datev Koinos */
             color: white;
-            padding: 2rem;
+            padding: 40px 30px;
             text-align: center;
         }
         
-        .logo {
-            width: 60px;
-            height: 60px;
-            background: white;
-            border-radius: 50%;
-            margin: 0 auto 1rem;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            font-size: 1.5rem;
-            font-weight: bold;
-            color: var(--primary);
-        }
-        
         .login-header h1 {
-            font-size: 1.5rem;
-            margin-bottom: 0.5rem;
+            font-size: 24px;
             font-weight: 600;
+            margin-bottom: 8px;
         }
         
         .login-header p {
-            font-size: 0.875rem;
+            font-size: 14px;
             opacity: 0.9;
         }
         
-        .login-body {
-            padding: 2rem;
-        }
-        
-        .alert {
-            padding: 0.75rem 1rem;
-            border-radius: 6px;
-            margin-bottom: 1.5rem;
-            font-size: 0.875rem;
-            display: flex;
-            align-items: center;
-            gap: 0.5rem;
-        }
-        
-        .alert-error {
-            background: #fef2f2;
-            color: #991b1b;
-            border: 1px solid #fecaca;
-        }
-        
-        .alert-success {
-            background: #f0fdf4;
-            color: #166534;
-            border: 1px solid #bbf7d0;
-        }
-        
-        .alert-icon {
-            font-size: 1.25rem;
+        /* Form */
+        .login-form {
+            padding: 40px 30px;
         }
         
         .form-group {
-            margin-bottom: 1.5rem;
+            margin-bottom: 24px;
         }
         
         .form-label {
             display: block;
-            margin-bottom: 0.5rem;
-            font-size: 0.875rem;
-            font-weight: 500;
-            color: var(--gray-700);
+            font-size: 13px;
+            font-weight: 600;
+            color: #374151;
+            margin-bottom: 8px;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
         }
         
         .form-input {
             width: 100%;
-            padding: 0.75rem 1rem;
-            border: 1px solid var(--gray-300);
+            padding: 12px 16px;
+            font-size: 16px;
+            border: 2px solid #e5e7eb;
             border-radius: 6px;
-            font-size: 1rem;
+            background: #f9fafb;
             transition: all 0.2s;
         }
         
         .form-input:focus {
             outline: none;
-            border-color: var(--primary);
+            border-color: #007849;
+            background: white;
             box-shadow: 0 0 0 3px rgba(0, 120, 73, 0.1);
         }
         
-        .form-input::placeholder {
-            color: var(--gray-400);
+        .form-input.error {
+            border-color: #dc2626;
         }
         
-        .btn {
-            width: 100%;
-            padding: 0.875rem;
-            border: none;
-            border-radius: 6px;
-            font-size: 1rem;
-            font-weight: 600;
-            cursor: pointer;
-            transition: all 0.2s;
+        /* Checkbox remember */
+        .form-checkbox {
             display: flex;
             align-items: center;
-            justify-content: center;
-            gap: 0.5rem;
+            margin-bottom: 24px;
         }
         
-        .btn-primary {
-            background: var(--primary);
+        .form-checkbox input {
+            width: 18px;
+            height: 18px;
+            margin-right: 8px;
+            cursor: pointer;
+        }
+        
+        .form-checkbox label {
+            font-size: 14px;
+            color: #6b7280;
+            cursor: pointer;
+        }
+        
+        /* Button */
+        .btn-login {
+            width: 100%;
+            padding: 14px 24px;
+            font-size: 16px;
+            font-weight: 600;
             color: white;
+            background: #007849;
+            border: none;
+            border-radius: 6px;
+            cursor: pointer;
+            transition: all 0.2s;
         }
         
-        .btn-primary:hover {
-            background: var(--primary-dark);
+        .btn-login:hover {
+            background: #005a37;
             transform: translateY(-1px);
-            box-shadow: var(--shadow-sm);
+            box-shadow: 0 4px 12px rgba(0, 120, 73, 0.2);
         }
         
-        .btn-primary:active {
+        .btn-login:active {
             transform: translateY(0);
         }
         
-        .btn-primary:disabled {
-            opacity: 0.6;
-            cursor: not-allowed;
-            transform: none;
+        /* Alert */
+        .alert {
+            padding: 12px 16px;
+            border-radius: 6px;
+            margin-bottom: 20px;
+            font-size: 14px;
         }
         
+        .alert-error {
+            background: #fee;
+            color: #dc2626;
+            border: 1px solid #fecaca;
+        }
+        
+        /* Footer */
         .login-footer {
-            padding: 1.5rem 2rem;
-            background: var(--gray-50);
             text-align: center;
-            font-size: 0.875rem;
-            color: var(--gray-500);
+            padding: 20px 30px;
+            background: #f9fafb;
+            border-top: 1px solid #e5e7eb;
+        }
+        
+        .login-footer p {
+            font-size: 13px;
+            color: #6b7280;
+        }
+        
+        /* Logo */
+        .logo {
+            width: 60px;
+            height: 60px;
+            background: white;
+            border-radius: 12px;
+            margin: 0 auto 20px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 24px;
+            font-weight: bold;
+            color: #007849;
+        }
+        
+        /* Responsive */
+        @media (max-width: 480px) {
+            .login-card {
+                box-shadow: none;
+                border-radius: 0;
+            }
+            
+            .login-container {
+                padding: 0;
+            }
+        }
+        
+        /* Loading state */
+        .btn-login:disabled {
+            opacity: 0.7;
+            cursor: not-allowed;
         }
         
         .spinner {
-            display: none;
-            width: 16px;
-            height: 16px;
-            border: 2px solid #ffffff40;
-            border-top-color: white;
-            border-radius: 50%;
-            animation: spin 0.8s linear infinite;
-        }
-        
-        .btn-primary:disabled .spinner {
             display: inline-block;
+            width: 14px;
+            height: 14px;
+            border: 2px solid rgba(255,255,255,0.3);
+            border-radius: 50%;
+            border-top-color: white;
+            animation: spin 0.8s ease-in-out infinite;
+            margin-left: 8px;
+            vertical-align: middle;
         }
         
         @keyframes spin {
             to { transform: rotate(360deg); }
         }
-        
-        /* Responsive */
-        @media (max-width: 480px) {
-            .login-body {
-                padding: 1.5rem;
-            }
-        }
     </style>
 </head>
 <body>
     <div class="login-container">
-        <div class="login-header">
-            <div class="logo">R</div>
-            <h1>CRM Re.De Consulting</h1>
-            <p>Accedi al sistema di gestione</p>
-        </div>
-        
-        <div class="login-body">
-            <?php if ($error): ?>
-            <div class="alert alert-error">
-                <span class="alert-icon">⚠️</span>
-                <span><?= htmlspecialchars($error) ?></span>
+        <div class="login-card">
+            <!-- Header -->
+            <div class="login-header">
+                <div class="logo">RC</div>
+                <h1>CRM Re.De Consulting</h1>
+                <p>Accedi al sistema di gestione dello studio</p>
             </div>
-            <?php endif; ?>
             
-            <?php if ($success): ?>
-            <div class="alert alert-success">
-                <span class="alert-icon">✅</span>
-                <span><?= htmlspecialchars($success) ?></span>
-            </div>
-            <?php endif; ?>
-            
-            <form method="POST" id="loginForm">
-                <input type="hidden" name="csrf_token" value="<?= htmlspecialchars($csrfToken) ?>">
+            <!-- Form -->
+            <form class="login-form" method="POST" id="loginForm">
+                <!-- Alert errori -->
+                <?php if ($error): ?>
+                    <div class="alert alert-error" role="alert">
+                        <?= htmlspecialchars($error) ?>
+                    </div>
+                <?php endif; ?>
                 
+                <!-- Email -->
                 <div class="form-group">
-                    <label class="form-label" for="email">Email</label>
+                    <label for="email" class="form-label">Email</label>
                     <input 
                         type="email" 
                         id="email" 
                         name="email" 
-                        class="form-input" 
-                        placeholder="nome@esempio.com"
+                        class="form-input <?= $error ? 'error' : '' ?>"
+                        value="<?= htmlspecialchars($email) ?>"
                         required
                         autofocus
                         autocomplete="email"
+                        placeholder="nome@studio.it"
                     >
                 </div>
                 
+                <!-- Password -->
                 <div class="form-group">
-                    <label class="form-label" for="password">Password</label>
+                    <label for="password" class="form-label">Password</label>
                     <input 
                         type="password" 
                         id="password" 
                         name="password" 
-                        class="form-input" 
-                        placeholder="••••••••"
+                        class="form-input <?= $error ? 'error' : '' ?>"
                         required
                         autocomplete="current-password"
+                        placeholder="••••••••"
                     >
                 </div>
                 
-                <button type="submit" class="btn btn-primary" id="submitBtn">
-                    <span>Accedi</span>
-                    <span class="spinner"></span>
+                <!-- Remember me -->
+                <div class="form-checkbox">
+                    <input type="checkbox" id="remember" name="remember" value="1">
+                    <label for="remember">Mantieni l'accesso</label>
+                </div>
+                
+                <!-- CSRF Token -->
+                <input type="hidden" name="csrf_token" value="<?= htmlspecialchars($csrf_token) ?>">
+                
+                <!-- Submit -->
+                <button type="submit" class="btn-login" id="submitBtn">
+                    Accedi
                 </button>
             </form>
-        </div>
-        
-        <div class="login-footer">
-            &copy; <?= date('Y') ?> Re.De Consulting - Tutti i diritti riservati
+            
+            <!-- Footer -->
+            <div class="login-footer">
+                <p>&copy; <?= date('Y') ?> Re.De Consulting - Tutti i diritti riservati</p>
+            </div>
         </div>
     </div>
     
     <script>
-        // Form submit con loading state
+        // Form handling
         document.getElementById('loginForm').addEventListener('submit', function(e) {
             const btn = document.getElementById('submitBtn');
             btn.disabled = true;
-            btn.querySelector('span:first-child').textContent = 'Accesso in corso...';
+            btn.innerHTML = 'Accesso in corso<span class="spinner"></span>';
         });
         
-        // Auto-focus su campo con errore
-        <?php if ($error): ?>
-        document.getElementById('email').focus();
-        document.getElementById('email').select();
-        <?php endif; ?>
+        // Auto-focus first empty field
+        document.addEventListener('DOMContentLoaded', function() {
+            const email = document.getElementById('email');
+            const password = document.getElementById('password');
+            
+            if (!email.value) {
+                email.focus();
+            } else {
+                password.focus();
+            }
+        });
     </script>
 </body>
 </html>

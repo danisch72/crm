@@ -1,110 +1,168 @@
 <?php
 /**
- * AUTH CONFIG - Configurazione Sistema Autenticazione
+ * CONFIG.PHP - Configurazione Sistema Autenticazione
  * CRM Re.De Consulting
  * 
- * SICUREZZA: Questo file legge le credenziali dal file .env
- * MAI inserire credenziali in chiaro in questo file!
- * 
- * File isolato per configurazione autenticazione
- * NESSUNA dipendenza da logiche business
+ * Carica configurazione da .env e definisce costanti
+ * COMPLETAMENTE ISOLATO DAI MODULI
  */
 
 // Previeni accesso diretto
 if (!defined('AUTH_INIT') && !defined('CRM_INIT')) {
-    http_response_code(403);
     die('Accesso diretto non consentito');
 }
 
 // ================================================================
-// CARICA CONFIGURAZIONE DA .ENV
+// CARICA FILE .ENV
 // ================================================================
-$envPath = dirname(dirname(__FILE__)) . '/.env'; // /crm/.env
 
-if (!file_exists($envPath)) {
-    die('ERRORE: File .env non trovato!');
+class EnvLoader {
+    private static $instance = null;
+    private $env = [];
+    
+    private function __construct() {
+        $this->loadEnv();
+    }
+    
+    public static function getInstance() {
+        if (self::$instance === null) {
+            self::$instance = new self();
+        }
+        return self::$instance;
+    }
+    
+    private function loadEnv() {
+        $envPath = dirname(dirname(__FILE__)) . '/.env';
+        
+        if (!file_exists($envPath)) {
+            die('File .env non trovato. Verificare configurazione.');
+        }
+        
+        $lines = file($envPath, FILE_IGNORE_NEW_LINES | FILE_SKIP_EMPTY_LINES);
+        
+        foreach ($lines as $line) {
+            // Ignora commenti
+            if (strpos(trim($line), '#') === 0) {
+                continue;
+            }
+            
+            // Parse KEY=VALUE
+            list($name, $value) = explode('=', $line, 2);
+            $name = trim($name);
+            $value = trim($value);
+            
+            // Rimuovi virgolette se presenti
+            if ((substr($value, 0, 1) === '"' && substr($value, -1) === '"') ||
+                (substr($value, 0, 1) === "'" && substr($value, -1) === "'")) {
+                $value = substr($value, 1, -1);
+            }
+            
+            $this->env[$name] = $value;
+        }
+    }
+    
+    public function get($key, $default = null) {
+        return $this->env[$key] ?? $default;
+    }
 }
 
-// Verifica permessi file (dovrebbe essere 600 o 640)
-$perms = fileperms($envPath) & 0777;
-if ($perms > 0640) {
-    error_log('ATTENZIONE: Il file .env ha permessi troppo permissivi: ' . decoct($perms));
-}
-
-// Parse .env file
-$env = parse_ini_file($envPath);
-
-if (!$env) {
-    die('ERRORE: Impossibile leggere file .env!');
-}
+// Carica ambiente
+$env = EnvLoader::getInstance();
 
 // ================================================================
-// CONFIGURAZIONE DATABASE (DA .ENV)
+// COSTANTI DATABASE
 // ================================================================
-define('AUTH_DB_HOST', $env['DB_HOST'] ?? '');
-define('AUTH_DB_NAME', $env['DB_NAME'] ?? '');
-define('AUTH_DB_USER', $env['DB_USERNAME'] ?? '');
-define('AUTH_DB_PASS', $env['DB_PASSWORD'] ?? '');
-define('AUTH_DB_CHARSET', $env['DB_CHARSET'] ?? 'utf8mb4');
 
-// Verifica che tutti i parametri siano presenti
-if (empty(AUTH_DB_HOST) || empty(AUTH_DB_NAME) || empty(AUTH_DB_USER) || empty(AUTH_DB_PASS)) {
-    die('ERRORE: Configurazione database incompleta in .env!');
-}
+define('DB_HOST', $env->get('DB_HOST', 'localhost'));
+define('DB_NAME', $env->get('DB_NAME'));
+define('DB_USERNAME', $env->get('DB_USERNAME'));
+define('DB_PASSWORD', $env->get('DB_PASSWORD'));
+define('DB_CHARSET', $env->get('DB_CHARSET', 'utf8mb4'));
 
 // ================================================================
-// CONFIGURAZIONE SESSIONI
+// COSTANTI SICUREZZA
 // ================================================================
-define('AUTH_SESSION_NAME', 'crm_rede_session');
-define('AUTH_SESSION_LIFETIME', (int)($env['SESSION_TIMEOUT'] ?? 3600));
-define('AUTH_SESSION_PATH', '/');
-define('AUTH_SESSION_SECURE', true);  // HTTPS only
-define('AUTH_SESSION_HTTPONLY', true); // No JS access
 
-// ================================================================
-// CONFIGURAZIONE SICUREZZA
-// ================================================================
-define('AUTH_SECRET_KEY', $env['APP_SECRET_KEY'] ?? 'default_insecure_key_change_me');
-define('AUTH_PASSWORD_ALGO', PASSWORD_ARGON2ID);
+define('AUTH_SECRET_KEY', $env->get('APP_SECRET_KEY', 'crm_rede_2025_secret_key_32chars'));
+define('AUTH_SESSION_LIFETIME', (int)$env->get('SESSION_TIMEOUT', 3600)); // 1 ora default
 define('AUTH_LOGIN_ATTEMPTS', 5); // Max tentativi login
 define('AUTH_LOCKOUT_TIME', 900); // 15 minuti lockout
-define('AUTH_CSRF_TOKEN_NAME', 'auth_token');
+define('AUTH_PASSWORD_ALGO', PASSWORD_ARGON2ID); // Algoritmo più sicuro
 
 // ================================================================
-// PATH E URL
+// COSTANTI PERCORSI
 // ================================================================
+
 define('AUTH_ROOT', dirname(__FILE__));
-define('AUTH_URL', '/crm/auth');
-define('CRM_URL', '/crm');
-define('LOGIN_URL', AUTH_URL . '/login.php');
-define('LOGOUT_URL', AUTH_URL . '/logout.php');
-define('DASHBOARD_URL', CRM_URL . '/?action=dashboard');
+define('CRM_ROOT_PATH', dirname(AUTH_ROOT));
+define('CRM_BASE_URL', '/crm');
+define('LOGIN_URL', CRM_BASE_URL . '/auth/login.php');
+define('LOGOUT_URL', CRM_BASE_URL . '/auth/logout.php');
+define('DASHBOARD_URL', CRM_BASE_URL . '/dashboard.php');
 
 // ================================================================
-// MESSAGGI SISTEMA
+// CONFIGURAZIONE SESSIONE
 // ================================================================
-define('AUTH_MSG_INVALID_CREDENTIALS', 'Email o password non validi');
-define('AUTH_MSG_ACCOUNT_LOCKED', 'Account bloccato per troppi tentativi');
-define('AUTH_MSG_ACCOUNT_INACTIVE', 'Account non attivo');
-define('AUTH_MSG_LOGIN_SUCCESS', 'Accesso effettuato con successo');
-define('AUTH_MSG_LOGOUT_SUCCESS', 'Disconnessione avvenuta con successo');
-define('AUTH_MSG_SESSION_EXPIRED', 'Sessione scaduta, effettua nuovamente il login');
-define('AUTH_MSG_NOT_AUTHENTICATED', 'Devi effettuare il login per accedere');
+
+// Configura sessione sicura
+ini_set('session.cookie_httponly', 1);
+ini_set('session.use_only_cookies', 1);
+ini_set('session.cookie_secure', isset($_SERVER['HTTPS']) ? 1 : 0);
+ini_set('session.cookie_samesite', 'Strict');
+ini_set('session.gc_maxlifetime', AUTH_SESSION_LIFETIME);
+
+// Nome sessione personalizzato
+session_name('CRM_REDE_AUTH');
 
 // ================================================================
-// OPZIONI DEBUG (disabilitare in produzione)
+// TIMEZONE E LOCALE
 // ================================================================
-define('AUTH_DEBUG', ($env['APP_DEBUG'] ?? 'false') === 'true');
-define('AUTH_LOG_ENABLED', true);
-define('AUTH_LOG_FILE', $_SERVER['DOCUMENT_ROOT'] . '/crm/' . ($env['LOG_PATH'] ?? 'auth/logs/') . 'auth.log');
+
+date_default_timezone_set($env->get('APP_TIMEZONE', 'Europe/Rome'));
+setlocale(LC_TIME, 'it_IT.UTF-8', 'it_IT', 'italian');
 
 // ================================================================
-// FUNZIONE AUTOLOAD SEMPLICE
+// ERROR REPORTING
 // ================================================================
-spl_autoload_register(function ($class) {
-    $file = AUTH_ROOT . '/' . $class . '.php';
-    if (file_exists($file)) {
-        require_once $file;
+
+if ($env->get('APP_DEBUG', 'false') === 'true') {
+    error_reporting(E_ALL);
+    ini_set('display_errors', 1);
+} else {
+    error_reporting(E_ERROR | E_WARNING);
+    ini_set('display_errors', 0);
+}
+
+// ================================================================
+// HELPER FUNCTIONS COMPATIBILITÀ
+// ================================================================
+
+/**
+ * Verifica se l'utente è autenticato (compatibilità legacy)
+ */
+if (!function_exists('isAuthenticated')) {
+    function isAuthenticated() {
+        if (session_status() !== PHP_SESSION_ACTIVE) {
+            session_start();
+        }
+        return isset($_SESSION['operatore_id']) && $_SESSION['operatore_id'] > 0;
     }
-});
-?>
+}
+
+/**
+ * Ottieni ID utente corrente (compatibilità legacy)
+ */
+if (!function_exists('getCurrentUserId')) {
+    function getCurrentUserId() {
+        return $_SESSION['operatore_id'] ?? null;
+    }
+}
+
+/**
+ * Verifica se admin (compatibilità legacy)
+ */
+if (!function_exists('isAdmin')) {
+    function isAdmin() {
+        return $_SESSION['is_amministratore'] ?? false;
+    }
+}
