@@ -2,48 +2,22 @@
 /**
  * INDEX.PHP - Entry Point CRM Re.De Consulting
  * 
- * VERSIONE SEMPLIFICATA
- * - Usa nuovo sistema auth isolato
- * - Nessuna logica business nel routing
- * - Solo gestione moduli base
+ * VERSIONE CON BOOTSTRAP
+ * - Usa bootstrap.php come ponte
+ * - Sistema auth completamente isolato
+ * - Solo gestione routing moduli
  */
 
 // ================================================================
-// INIZIALIZZAZIONE
+// CARICA BOOTSTRAP (che gestisce tutto)
 // ================================================================
-define('CRM_INIT', true);
-define('CRM_ROOT', __DIR__);
+require_once __DIR__ . '/core/bootstrap.php';
 
-// ================================================================
-// CARICA SISTEMA AUTH
-// ================================================================
-require_once CRM_ROOT . '/auth/config.php';
-require_once CRM_ROOT . '/auth/Auth.php';
-
-// ================================================================
-// VERIFICA AUTENTICAZIONE
-// ================================================================
-$auth = Auth::getInstance();
-
-// Se non autenticato, redirect al login
-if (!$auth->isAuthenticated()) {
-    header('Location: ' . LOGIN_URL);
-    exit;
-}
-
-// ================================================================
-// CARICA COMPONENTI BASE
-// ================================================================
-
-// Database (se necessario per moduli)
-if (file_exists(CRM_ROOT . '/core/classes/Database.php')) {
-    require_once CRM_ROOT . '/core/classes/Database.php';
-}
-
-// Helpers (mantieni per compatibilità)
-if (file_exists(CRM_ROOT . '/core/functions/helpers.php')) {
-    require_once CRM_ROOT . '/core/functions/helpers.php';
-}
+// Bootstrap ha già:
+// - Verificato autenticazione
+// - Caricato sistema auth
+// - Caricato componenti opzionali
+// - Definito funzioni utility
 
 // ================================================================
 // ROUTING SEMPLIFICATO
@@ -54,103 +28,32 @@ $action = isset($_GET['action']) ? preg_replace('/[^a-z0-9_-]/i', '', $_GET['act
 
 // Array moduli disponibili (aggiungere nuovi moduli qui)
 $availableModules = [
-    'dashboard' => '/dashboard.php',
-    'operatori' => '/modules/operatori/index.php',
-    'clienti' => '/modules/clienti/index.php',
-    'logout' => AUTH_ROOT . '/logout.php'
+    'dashboard' => 'modules/dashboard',       // Modulo dashboard
+    'operatori' => 'modules/operatori',       // Modulo operatori
+    'clienti' => 'modules/clienti',           // Modulo clienti
+    // Aggiungere nuovi moduli qui
 ];
 
 // Gestione routing
 switch ($action) {
     case 'logout':
-        // Redirect a logout nel sistema auth
-        header('Location: ' . LOGOUT_URL);
-        exit;
-        break;
-        
-    case 'dashboard':
-        // Dashboard principale
-        $file = CRM_ROOT . '/dashboard.php';
-        if (file_exists($file)) {
-            include $file;
-        } else {
-            showError('Dashboard non trovata');
-        }
+        // Include direttamente il file di logout
+        require_once CRM_ROOT . '/auth/logout.php';
         break;
         
     default:
         // Cerca tra i moduli disponibili
         if (isset($availableModules[$action])) {
-            $file = CRM_ROOT . $availableModules[$action];
-            if (file_exists($file)) {
-                include $file;
-            } else {
-                showError('Modulo non trovato: ' . $action);
+            // Tutti i moduli sono nella directory modules
+            $moduleName = str_replace('modules/', '', $availableModules[$action]);
+            if (!loadModule($moduleName)) {
+                showError("Modulo '$action' non trovato");
             }
         } else {
-            showError('Azione non valida: ' . $action);
+            showError("Azione '$action' non valida");
         }
         break;
 }
 
-// ================================================================
-// FUNZIONI HELPER
-// ================================================================
-
-/**
- * Mostra errore generico
- */
-function showError($message) {
-    ?>
-    <!DOCTYPE html>
-    <html lang="it">
-    <head>
-        <meta charset="UTF-8">
-        <title>Errore - CRM Re.De Consulting</title>
-        <style>
-            body {
-                font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-                background: #f5f7f9;
-                display: flex;
-                align-items: center;
-                justify-content: center;
-                min-height: 100vh;
-                margin: 0;
-            }
-            .error-box {
-                background: white;
-                padding: 40px;
-                border-radius: 8px;
-                box-shadow: 0 2px 8px rgba(0,0,0,0.1);
-                text-align: center;
-                max-width: 500px;
-            }
-            h1 {
-                color: #dc2626;
-                margin-bottom: 20px;
-            }
-            p {
-                color: #666;
-                margin-bottom: 30px;
-            }
-            a {
-                color: #007849;
-                text-decoration: none;
-                font-weight: 600;
-            }
-            a:hover {
-                text-decoration: underline;
-            }
-        </style>
-    </head>
-    <body>
-        <div class="error-box">
-            <h1>Errore</h1>
-            <p><?= htmlspecialchars($message) ?></p>
-            <a href="<?= CRM_BASE_URL ?>">Torna alla Dashboard</a>
-        </div>
-    </body>
-    </html>
-    <?php
-    exit;
-}
+// Fine index.php
+?>

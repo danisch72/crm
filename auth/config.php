@@ -97,8 +97,8 @@ define('AUTH_ROOT', dirname(__FILE__));
 define('CRM_ROOT_PATH', dirname(AUTH_ROOT));
 define('CRM_BASE_URL', '/crm');
 define('LOGIN_URL', CRM_BASE_URL . '/auth/login.php');
-define('LOGOUT_URL', CRM_BASE_URL . '/auth/logout.php');
-define('DASHBOARD_URL', CRM_BASE_URL . '/dashboard.php');
+define('LOGOUT_URL', CRM_BASE_URL . '/?action=logout');
+define('DASHBOARD_URL', CRM_BASE_URL . '/?action=dashboard');
 
 // ================================================================
 // CONFIGURAZIONE SESSIONE
