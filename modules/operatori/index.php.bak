@@ -1,0 +1,753 @@
+<?php
+/**
+ * modules/operatori/index.php - Lista Operatori CRM Re.De Consulting
+ * 
+ * Gestione lista operatori con:
+ * - Visualizzazione tabellare responsive
+ * - Filtri avanzati e ricerca
+ * - Controlli admin per attivazione/disattivazione
+ * - Statistiche sessioni in tempo reale
+ */
+
+// Avvia sessione se non già attiva
+if (session_status() === PHP_SESSION_NONE) {
+    session_start();
+}
+
+// Percorsi assoluti per evitare problemi
+require_once $_SERVER['DOCUMENT_ROOT'] . '/crm/core/classes/Database.php';
+require_once $_SERVER['DOCUMENT_ROOT'] . '/crm/core/auth/AuthSystem.php';
+require_once $_SERVER['DOCUMENT_ROOT'] . '/crm/core/functions/helpers.php';
+
+
+// Verifica autenticazione
+if (!AuthSystem::isAuthenticated()) {
+    header('Location: /crm/core/auth/login.php');
+    exit;
+}
+
+$sessionInfo = AuthSystem::getSessionInfo();
+$db = Database::getInstance();
+
+// Verifica permessi amministratore per alcune azioni
+$isAdmin = $sessionInfo['is_admin'];
+
+// Gestione filtri
+$search = $_GET['search'] ?? '';
+$status = $_GET['status'] ?? 'all';
+$role = $_GET['role'] ?? 'all';
+
+// Costruzione query con filtri
+$whereConditions = [];
+$params = [];
+
+if (!empty($search)) {
+    $whereConditions[] = "(nome LIKE ? OR cognome LIKE ? OR email LIKE ?)";
+    $searchParam = "%$search%";
+    $params[] = $searchParam;
+    $params[] = $searchParam;
+    $params[] = $searchParam;
+}
+
+if ($status !== 'all') {
+    $whereConditions[] = "is_attivo = ?";
+    $params[] = ($status === 'active') ? 1 : 0;
+}
+
+if ($role !== 'all') {
+    $whereConditions[] = "is_amministratore = ?";
+    $params[] = ($role === 'admin') ? 1 : 0;
+}
+
+$whereClause = !empty($whereConditions) ? 'WHERE ' . implode(' AND ', $whereConditions) : '';
+
+// Query principale operatori
+$operatori = $db->select(
+    "SELECT o.*, 
+            COUNT(DISTINCT sl_active.id) as sessioni_attive,
+            COUNT(DISTINCT sl_week.id) as sessioni_settimana,
+            COALESCE(SUM(sl_week.ore_effettive), 0) as ore_settimana,
+            COALESCE(SUM(sl_week.ore_extra), 0) as ore_extra_settimana,
+            MAX(sl_week.login_timestamp) as ultimo_accesso
+     FROM operatori o
+     LEFT JOIN sessioni_lavoro sl_active ON o.id = sl_active.operatore_id AND sl_active.is_attiva = 1
+     LEFT JOIN sessioni_lavoro sl_week ON o.id = sl_week.operatore_id 
+        AND sl_week.login_timestamp >= DATE_SUB(CURDATE(), INTERVAL 7 DAY)
+     $whereClause
+     GROUP BY o.id
+     ORDER BY o.is_amministratore DESC, o.cognome ASC, o.nome ASC",
+    $params
+);
+
+// Statistiche generali per admin
+$stats = null;
+if ($isAdmin) {
+    $stats = $db->selectOne(
+        "SELECT 
+            COUNT(*) as totale_operatori,
+            SUM(CASE WHEN is_attivo = 1 THEN 1 ELSE 0 END) as operatori_attivi,
+            SUM(CASE WHEN is_amministratore = 1 THEN 1 ELSE 0 END) as amministratori,
+            COUNT(DISTINCT sl.id) as sessioni_oggi
+         FROM operatori o
+         LEFT JOIN sessioni_lavoro sl ON o.id = sl.operatore_id 
+            AND DATE(sl.login_timestamp) = CURDATE()",
+        []
+    );
+}
+
+// Gestione azioni AJAX
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
+    header('Content-Type: application/json');
+    
+    if (!$isAdmin) {
+        echo json_encode(['success' => false, 'message' => 'Permessi insufficienti']);
+        exit;
+    }
+    
+    $action = $_POST['action'];
+    $operatoreId = $_POST['operatore_id'] ?? null;
+    
+    try {
+        switch ($action) {
+            case 'toggle_status':
+                $operatore = $db->selectOne("SELECT is_attivo FROM operatori WHERE id = ?", [$operatoreId]);
+                if (!$operatore) throw new Exception('Operatore non trovato');
+                
+                $newStatus = $operatore['is_attivo'] ? 0 : 1;
+                $db->execute("UPDATE operatori SET is_attivo = ? WHERE id = ?", [$newStatus, $operatoreId]);
+                
+                echo json_encode([
+                    'success' => true, 
+                    'message' => $newStatus ? 'Operatore attivato' : 'Operatore disattivato',
+                    'new_status' => $newStatus
+                ]);
+                break;
+                
+            case 'reset_password':
+                $tempPassword = 'temp' . rand(1000, 9999);
+                $passwordHash = password_hash($tempPassword, PASSWORD_DEFAULT);
+                
+                $db->execute("UPDATE operatori SET password_hash = ? WHERE id = ?", [$passwordHash, $operatoreId]);
+                
+                echo json_encode([
+                    'success' => true, 
+                    'message' => 'Password resettata',
+                    'temp_password' => $tempPassword
+                ]);
+                break;
+                
+            case 'close_sessions':
+                $updated = $db->execute(
+                    "UPDATE sessioni_lavoro SET 
+                     is_attiva = 0, 
+                     logout_timestamp = NOW(),
+                     ore_effettive = TIMESTAMPDIFF(SECOND, login_timestamp, NOW()) / 3600,
+                     ore_extra = GREATEST(0, (TIMESTAMPDIFF(SECOND, login_timestamp, NOW()) / 3600) - ore_contratto),
+                     note = 'Chiusa da amministratore'
+                     WHERE operatore_id = ? AND is_attiva = 1", 
+                    [$operatoreId]
+                );
+                
+                echo json_encode([
+                    'success' => true, 
+                    'message' => "Chiuse $updated sessioni attive"
+                ]);
+                break;
+                
+            default:
+                echo json_encode(['success' => false, 'message' => 'Azione non valida']);
+        }
+    } catch (Exception $e) {
+        echo json_encode(['success' => false, 'message' => $e->getMessage()]);
+    }
+    exit;
+}
+?>
+<!DOCTYPE html>
+<html lang="it">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Gestione Operatori - CRM Re.De Consulting</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="../../assets/css/datev-style.css">
+    <link rel="stylesheet" href="../../assets/css/responsive.css">
+    <style>
+        /* Stili specifici per lista operatori */
+        .operators-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 2rem;
+            flex-wrap: wrap;
+            gap: 1rem;
+        }
+        
+        .filters-section {
+            background: white;
+            padding: 1.5rem;
+            border-radius: var(--radius-xl);
+            margin-bottom: 2rem;
+            box-shadow: var(--shadow-sm);
+            border: 1px solid var(--gray-200);
+        }
+        
+        .filters-row {
+            display: grid;
+            grid-template-columns: 2fr 1fr 1fr auto;
+            gap: 1rem;
+            align-items: end;
+        }
+        
+        .operator-card {
+            background: white;
+            border-radius: var(--radius-xl);
+            padding: 1.5rem;
+            margin-bottom: 1rem;
+            box-shadow: var(--shadow-sm);
+            border: 1px solid var(--gray-200);
+            transition: all var(--transition-normal);
+        }
+        
+        .operator-card:hover {
+            box-shadow: var(--shadow-md);
+            transform: translateY(-2px);
+        }
+        
+        .operator-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: flex-start;
+            margin-bottom: 1rem;
+        }
+        
+        .operator-info {
+            flex: 1;
+        }
+        
+        .operator-name {
+            font-size: var(--font-size-lg);
+            font-weight: 600;
+            color: var(--gray-800);
+            margin-bottom: 0.25rem;
+        }
+        
+        .operator-email {
+            color: var(--gray-500);
+            font-size: var(--font-size-sm);
+            margin-bottom: 0.5rem;
+        }
+        
+        .operator-badges {
+            display: flex;
+            gap: 0.5rem;
+            flex-wrap: wrap;
+        }
+        
+        .operator-stats {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+            gap: 1rem;
+            margin-top: 1rem;
+            padding-top: 1rem;
+            border-top: 1px solid var(--gray-200);
+        }
+        
+        .stat-item {
+            text-align: center;
+        }
+        
+        .stat-value {
+            font-size: var(--font-size-lg);
+            font-weight: 600;
+            color: var(--gray-800);
+            display: block;
+        }
+        
+        .stat-label {
+            font-size: var(--font-size-xs);
+            color: var(--gray-500);
+            margin-top: 0.25rem;
+        }
+        
+        .operator-actions {
+            display: flex;
+            gap: 0.5rem;
+            flex-wrap: wrap;
+        }
+        
+        .session-indicator {
+            width: 12px;
+            height: 12px;
+            border-radius: 50%;
+            display: inline-block;
+            margin-right: 0.5rem;
+        }
+        
+        .session-active { background: var(--secondary-green); }
+        .session-inactive { background: var(--gray-400); }
+        
+        .admin-controls {
+            background: var(--gray-50);
+            border-radius: var(--radius-lg);
+            padding: 1rem;
+            margin-top: 1rem;
+        }
+        
+        .admin-controls h4 {
+            margin: 0 0 0.5rem 0;
+            font-size: var(--font-size-sm);
+            color: var(--gray-700);
+        }
+        
+        @media (max-width: 768px) {
+            .filters-row {
+                grid-template-columns: 1fr;
+            }
+            
+            .operators-header {
+                flex-direction: column;
+                align-items: stretch;
+            }
+            
+            .operator-header {
+                flex-direction: column;
+                gap: 1rem;
+            }
+            
+            .operator-actions {
+                justify-content: flex-start;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="app-layout">
+        <!-- Sidebar Navigation -->
+        <aside class="sidebar">
+            <div class="sidebar-header">
+                <div class="sidebar-logo">
+                    <div class="logo-icon">R</div>
+                    <span>CRM Re.De</span>
+                </div>
+            </div>
+            
+            <nav class="sidebar-nav">
+                <div class="nav-section">
+                    <div class="nav-section-title">Dashboard</div>
+                    <div class="nav-item">
+                        <a href="/crm/dashboard.php" class="nav-link">
+                            <span class="nav-icon">📊</span>
+                            <span>Dashboard</span>
+                        </a>
+                    </div>
+                </div>
+                
+                <div class="nav-section">
+                    <div class="nav-section-title">Gestione</div>
+                    <div class="nav-item">
+                        <a href="/crm/modules/operatori/" class="nav-link active">
+                            <span class="nav-icon">👥</span>
+                            <span>Operatori</span>
+                            <?php if ($isAdmin): ?>
+                                <span class="nav-badge">Admin</span>
+                            <?php endif; ?>
+                        </a>
+                    </div>
+                    <div class="nav-item">
+                        <a href="/crm/modules/clienti/" class="nav-link">
+                            <span class="nav-icon">🏢</span>
+                            <span>Clienti</span>
+                        </a>
+                    </div>
+                    <div class="nav-item">
+                        <a href="/crm/modules/pratiche/" class="nav-link">
+                            <span class="nav-icon">📋</span>
+                            <span>Pratiche</span>
+                        </a>
+                    </div>
+                </div>
+            </nav>
+        </aside>
+        
+        <!-- Main Content -->
+        <main class="main-content">
+            <!-- Header -->
+            <header class="app-header">
+                <div class="header-left">
+                    <button class="sidebar-toggle" type="button">
+                        <span style="font-size: 1.25rem;">☰</span>
+                    </button>
+                    <h1 class="page-title">Gestione Operatori</h1>
+                </div>
+                
+                <div class="header-right">
+                    <!-- Timer Lavoro -->
+                    <div class="work-timer work-timer-display">
+                        <span class="timer-icon">⏱️</span>
+                        <span class="time-display">00:00:00</span>
+                    </div>
+                    
+                    <!-- User Menu -->
+                    <div class="user-menu">
+                        <div class="user-avatar" data-tooltip="<?= htmlspecialchars($sessionInfo['nome_completo']) ?>">
+                            <?= substr($sessionInfo['nome_completo'], 0, 1) ?>
+                        </div>
+                    </div>
+                </div>
+            </header>
+            
+            <!-- Content -->
+            <div style="padding: 2rem;">
+                <!-- Header con azioni -->
+                <div class="operators-header">
+                    <div>
+                        <h2 style="color: var(--gray-800); margin-bottom: 0.5rem;">
+                            👥 Gestione Operatori
+                        </h2>
+                        <p style="color: var(--gray-500);">
+                            Visualizza e gestisci tutti gli operatori del sistema
+                        </p>
+                    </div>
+                    
+                    <div style="display: flex; gap: 1rem;">
+                        <?php if ($isAdmin): ?>
+                            <a href="create.php" class="btn btn-primary">
+                                ➕ Nuovo Operatore
+                            </a>
+                            <a href="stats.php" class="btn btn-secondary">
+                                📊 Statistiche Team
+                            </a>
+                        <?php endif; ?>
+                    </div>
+                </div>
+                
+                <!-- Statistiche Generali (Solo Admin) -->
+                <?php if ($isAdmin && $stats): ?>
+                <div class="stats-grid" style="margin-bottom: 2rem;">
+                    <div class="stat-card">
+                        <div class="stat-value"><?= $stats['totale_operatori'] ?></div>
+                        <div class="stat-label">Operatori Totali</div>
+                    </div>
+                    
+                    <div class="stat-card">
+                        <div class="stat-value"><?= $stats['operatori_attivi'] ?></div>
+                        <div class="stat-label">Operatori Attivi</div>
+                        <div class="stat-change">
+                            <?php 
+                            $percentuale = $stats['totale_operatori'] > 0 ? round(($stats['operatori_attivi'] / $stats['totale_operatori']) * 100) : 0;
+                            ?>
+                            <span><?= $percentuale ?>% del totale</span>
+                        </div>
+                    </div>
+                    
+                    <div class="stat-card">
+                        <div class="stat-value"><?= $stats['amministratori'] ?></div>
+                        <div class="stat-label">Amministratori</div>
+                    </div>
+                    
+                    <div class="stat-card">
+                        <div class="stat-value"><?= $stats['sessioni_oggi'] ?></div>
+                        <div class="stat-label">Sessioni Oggi</div>
+                        <div class="stat-change">
+                            <span>📅 <?= date('d/m/Y') ?></span>
+                        </div>
+                    </div>
+                </div>
+                <?php endif; ?>
+                
+                <!-- Filtri -->
+                <div class="filters-section">
+                    <form method="GET" id="filterForm">
+                        <div class="filters-row">
+                            <div class="form-group" style="margin-bottom: 0;">
+                                <label class="form-label" for="search">Ricerca</label>
+                                <input type="text" 
+                                       id="search" 
+                                       name="search" 
+                                       class="form-control" 
+                                       placeholder="Nome, cognome o email..."
+                                       value="<?= htmlspecialchars($search) ?>">
+                            </div>
+                            
+                            <div class="form-group" style="margin-bottom: 0;">
+                                <label class="form-label" for="status">Stato</label>
+                                <select id="status" name="status" class="form-control">
+                                    <option value="all" <?= $status === 'all' ? 'selected' : '' ?>>Tutti</option>
+                                    <option value="active" <?= $status === 'active' ? 'selected' : '' ?>>Attivi</option>
+                                    <option value="inactive" <?= $status === 'inactive' ? 'selected' : '' ?>>Disattivi</option>
+                                </select>
+                            </div>
+                            
+                            <div class="form-group" style="margin-bottom: 0;">
+                                <label class="form-label" for="role">Ruolo</label>
+                                <select id="role" name="role" class="form-control">
+                                    <option value="all" <?= $role === 'all' ? 'selected' : '' ?>>Tutti</option>
+                                    <option value="admin" <?= $role === 'admin' ? 'selected' : '' ?>>Amministratori</option>
+                                    <option value="user" <?= $role === 'user' ? 'selected' : '' ?>>Operatori</option>
+                                </select>
+                            </div>
+                            
+                            <div>
+                                <button type="submit" class="btn btn-primary">🔍 Filtra</button>
+                            </div>
+                        </div>
+                    </form>
+                </div>
+                
+                <!-- Lista Operatori -->
+                <div class="operators-list">
+                    <?php if (empty($operatori)): ?>
+                        <div class="card" style="text-align: center; padding: 3rem;">
+                            <h3 style="color: var(--gray-500); margin-bottom: 1rem;">👥 Nessun operatore trovato</h3>
+                            <p style="color: var(--gray-400); margin-bottom: 2rem;">
+                                Non ci sono operatori che corrispondono ai filtri selezionati.
+                            </p>
+                            <?php if ($isAdmin): ?>
+                                <a href="create.php" class="btn btn-primary">
+                                    ➕ Crea Primo Operatore
+                                </a>
+                            <?php endif; ?>
+                        </div>
+                    <?php else: ?>
+                        <?php foreach ($operatori as $operatore): ?>
+                            <div class="operator-card" data-operator-id="<?= $operatore['id'] ?>">
+                                <div class="operator-header">
+                                    <div class="operator-info">
+                                        <div class="operator-name">
+                                            <span class="session-indicator <?= $operatore['sessioni_attive'] > 0 ? 'session-active' : 'session-inactive' ?>"></span>
+                                            <?= htmlspecialchars($operatore['cognome'] . ' ' . $operatore['nome']) ?>
+                                        </div>
+                                        <div class="operator-email">
+                                            📧 <?= htmlspecialchars($operatore['email']) ?>
+                                        </div>
+                                        <div class="operator-badges">
+                                            <?php if ($operatore['is_amministratore']): ?>
+                                                <span class="badge badge-info">👨‍💼 Amministratore</span>
+                                            <?php endif; ?>
+                                            
+                                            <span class="badge badge-<?= $operatore['is_attivo'] ? 'success' : 'danger' ?>">
+                                                <?= $operatore['is_attivo'] ? '✅ Attivo' : '❌ Disattivo' ?>
+                                            </span>
+                                            
+                                            <?php if ($operatore['sessioni_attive'] > 0): ?>
+                                                <span class="badge badge-warning">🔴 Online</span>
+                                            <?php endif; ?>
+                                            
+                                            <span class="badge badge-secondary">
+                                                📋 <?= ucfirst($operatore['tipo_contratto']) ?>
+                                            </span>
+                                        </div>
+                                    </div>
+                                    
+                                    <div class="operator-actions">
+                                        <a href="view.php?id=<?= $operatore['id'] ?>" 
+                                           class="btn btn-sm btn-secondary" 
+                                           data-tooltip="Visualizza dettagli">
+                                            👁️ Dettagli
+                                        </a>
+                                        
+                                        <?php if ($isAdmin || $operatore['id'] == $sessionInfo['operatore_id']): ?>
+                                            <a href="edit.php?id=<?= $operatore['id'] ?>" 
+                                               class="btn btn-sm btn-primary">
+                                                ✏️ Modifica
+                                            </a>
+                                        <?php endif; ?>
+                                    </div>
+                                </div>
+                                
+                                <!-- Statistiche Operatore -->
+                                <div class="operator-stats">
+                                    <div class="stat-item">
+                                        <span class="stat-value"><?= $operatore['sessioni_settimana'] ?></span>
+                                        <div class="stat-label">Sessioni 7gg</div>
+                                    </div>
+                                    
+                                    <div class="stat-item">
+                                        <span class="stat-value"><?= number_format($operatore['ore_settimana'], 1) ?>h</span>
+                                        <div class="stat-label">Ore Lavorate</div>
+                                    </div>
+                                    
+                                    <div class="stat-item">
+                                        <span class="stat-value <?= $operatore['ore_extra_settimana'] > 0 ? 'text-warning' : '' ?>">
+                                            <?= $operatore['ore_extra_settimana'] > 0 ? '+' . number_format($operatore['ore_extra_settimana'], 1) : '0' ?>h
+                                        </span>
+                                        <div class="stat-label">Ore Extra</div>
+                                    </div>
+                                    
+                                    <div class="stat-item">
+                                        <span class="stat-value">
+                                            <?php if ($operatore['ultimo_accesso']): ?>
+                                                <?= date('d/m', strtotime($operatore['ultimo_accesso'])) ?>
+                                            <?php else: ?>
+                                                -
+                                            <?php endif; ?>
+                                        </span>
+                                        <div class="stat-label">Ultimo Accesso</div>
+                                    </div>
+                                </div>
+                                
+                                <!-- Controlli Admin -->
+                                <?php if ($isAdmin && $operatore['id'] != $sessionInfo['operatore_id']): ?>
+                                <div class="admin-controls">
+                                    <h4>🔧 Controlli Amministratore</h4>
+                                    <div style="display: flex; gap: 0.5rem; flex-wrap: wrap;">
+                                        <button class="btn btn-sm btn-secondary" 
+                                                onclick="toggleOperatorStatus(<?= $operatore['id'] ?>)"
+                                                data-tooltip="<?= $operatore['is_attivo'] ? 'Disattiva operatore' : 'Attiva operatore' ?>">
+                                            <?= $operatore['is_attivo'] ? '🚫 Disattiva' : '✅ Attiva' ?>
+                                        </button>
+                                        
+                                        <button class="btn btn-sm btn-warning" 
+                                                onclick="resetPassword(<?= $operatore['id'] ?>)"
+                                                data-tooltip="Genera password temporanea">
+                                            🔑 Reset Password
+                                        </button>
+                                        
+                                        <?php if ($operatore['sessioni_attive'] > 0): ?>
+                                        <button class="btn btn-sm btn-danger" 
+                                                onclick="closeSessions(<?= $operatore['id'] ?>)"
+                                                data-tooltip="Chiudi tutte le sessioni attive">
+                                            🔴 Chiudi Sessioni
+                                        </button>
+                                        <?php endif; ?>
+                                    </div>
+                                </div>
+                                <?php endif; ?>
+                            </div>
+                        <?php endforeach; ?>
+                    <?php endif; ?>
+                </div>
+            </div>
+        </main>
+    </div>
+    
+    <!-- Scripts -->
+    <script src="../../assets/js/microinteractions.js"></script>
+    <script>
+        // Auto-submit filtri
+        document.getElementById('search').addEventListener('input', debounce(function() {
+            document.getElementById('filterForm').submit();
+        }, 500));
+        
+        document.getElementById('status').addEventListener('change', function() {
+            document.getElementById('filterForm').submit();
+        });
+        
+        document.getElementById('role').addEventListener('change', function() {
+            document.getElementById('filterForm').submit();
+        });
+        
+        // Funzioni admin
+        function toggleOperatorStatus(operatorId) {
+            if (!confirm('Sei sicuro di voler cambiare lo stato di questo operatore?')) return;
+            
+            adminAction('toggle_status', operatorId)
+                .then(data => {
+                    if (data.success) {
+                        showNotification(data.message, 'success');
+                        setTimeout(() => location.reload(), 1500);
+                    }
+                });
+        }
+        
+        function resetPassword(operatorId) {
+            if (!confirm('Sei sicuro di voler resettare la password? Verrà generata una password temporanea.')) return;
+            
+            adminAction('reset_password', operatorId)
+                .then(data => {
+                    if (data.success) {
+                        const modal = crmInteractions.showModal('Password Resettata', `
+                            <div style="text-align: center;">
+                                <p>Password temporanea generata:</p>
+                                <div style="background: var(--gray-100); padding: 1rem; border-radius: var(--radius-md); font-family: monospace; font-size: 1.125rem; margin: 1rem 0;">
+                                    ${data.temp_password}
+                                </div>
+                                <p style="color: var(--gray-600); font-size: 0.875rem;">
+                                    L'operatore dovrà cambiarla al primo accesso.
+                                </p>
+                            </div>
+                        `);
+                    }
+                });
+        }
+        
+        function closeSessions(operatorId) {
+            if (!confirm('Sei sicuro di voler chiudere tutte le sessioni attive di questo operatore?')) return;
+            
+            adminAction('close_sessions', operatorId)
+                .then(data => {
+                    if (data.success) {
+                        showNotification(data.message, 'success');
+                        setTimeout(() => location.reload(), 1500);
+                    }
+                });
+        }
+        
+        // Utility function per azioni admin
+        async function adminAction(action, operatorId) {
+            try {
+                const response = await fetch(window.location.href, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+                    body: `action=${action}&operatore_id=${operatorId}`
+                });
+                
+                const data = await response.json();
+                
+                if (!data.success) {
+                    showNotification(data.message, 'error');
+                }
+                
+                return data;
+            } catch (error) {
+                showNotification('Errore di connessione', 'error');
+                return { success: false };
+            }
+        }
+        
+        // Utility debounce
+        function debounce(func, wait) {
+            let timeout;
+            return function executedFunction(...args) {
+                const later = () => {
+                    clearTimeout(timeout);
+                    func(...args);
+                };
+                clearTimeout(timeout);
+                timeout = setTimeout(later, wait);
+            };
+        }
+        
+        // Notification helper
+        function showNotification(message, type) {
+            if (crmInteractions) {
+                crmInteractions.showNotification(message, type);
+            }
+        }
+        
+        // Auto-refresh ogni 30 secondi per aggiornare statistiche
+        setInterval(() => {
+            // Aggiorna solo indicatori sessione attiva senza reload completo
+            fetch(window.location.href)
+                .then(response => response.text())
+                .then(html => {
+                    // Parse per estrarre solo gli indicatori di sessione
+                    const parser = new DOMParser();
+                    const doc = parser.parseFromString(html, 'text/html');
+                    const newIndicators = doc.querySelectorAll('.session-indicator');
+                    const currentIndicators = document.querySelectorAll('.session-indicator');
+                    
+                    newIndicators.forEach((newIndicator, index) => {
+                        if (currentIndicators[index]) {
+                            currentIndicators[index].className = newIndicator.className;
+                        }
+                    });
+                })
+                .catch(error => console.log('Auto-refresh error:', error));
+        }, 30000);
+    </script>
+</body>
+</html>
