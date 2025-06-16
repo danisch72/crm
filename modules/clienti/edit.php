@@ -1,187 +1,180 @@
 <?php
 /**
- * modules/operatori/edit.php - Modifica Operatore CRM Re.De Consulting
+ * modules/clienti/edit.php - Modifica Cliente CRM Re.De Consulting
  * 
  * ✅ VERSIONE AGGIORNATA CON ROUTER
  */
 
 // Verifica che siamo passati dal router
-if (!defined('OPERATORI_ROUTER_LOADED')) {
-    header('Location: /crm/?action=operatori');
+if (!defined('CLIENTI_ROUTER_LOADED')) {
+    header('Location: /crm/?action=clienti');
     exit;
 }
 
 // Variabili già disponibili dal router:
 // $sessionInfo, $db, $error_message, $success_message
-// $operatoreId (validato dal router)
+// $clienteId (validato dal router)
 
-$pageTitle = 'Modifica Operatore';
+$pageTitle = 'Modifica Cliente';
 
-// Recupera dati operatore
-$operatore = $db->selectOne("SELECT * FROM operatori WHERE id = ?", [$operatoreId]);
-if (!$operatore) {
-    header('Location: /crm/?action=operatori&error=not_found');
+// Recupera dati cliente
+$cliente = $db->selectOne("SELECT * FROM clienti WHERE id = ?", [$clienteId]);
+if (!$cliente) {
+    header('Location: /crm/?action=clienti&error=not_found');
     exit;
 }
 
-// **LOGICA ESISTENTE MANTENUTA** - Controllo permessi: admin o auto-edit
-$canEdit = $sessionInfo['is_admin'] || $sessionInfo['operatore_id'] == $operatoreId;
-$isAdminEdit = $sessionInfo['is_admin'] && $sessionInfo['operatore_id'] != $operatoreId;
-$isSelfEdit = $sessionInfo['operatore_id'] == $operatoreId;
+// Controllo permessi: admin o operatore responsabile
+$canEdit = $sessionInfo['is_admin'] || 
+           $cliente['operatore_responsabile_id'] == $sessionInfo['operatore_id'];
 
 if (!$canEdit) {
-    header('Location: /crm/?action=operatori&error=permissions');
+    header('Location: /crm/?action=clienti&error=permissions');
     exit;
 }
 
-// **LOGICA ESISTENTE MANTENUTA** - Qualifiche predefinite disponibili
-$qualificheDisponibili = [
-    'Contabilità Generale',
-    'Bilanci',
-    'Dichiarazioni IRPEF',
-    'Dichiarazioni IRES',
-    'Liquidazioni IVA',
-    'F24 e Versamenti',
-    'Consulenza Fiscale',
-    'Consulenza del Lavoro',
-    'Pratiche INPS',
-    'Pratiche Camera di Commercio',
-    'Contrattualistica',
-    'Amministrazione Condominiali',
-    'Gestione Clienti',
-    'Formazione e Supporto'
+// Carica lista operatori per assegnazione
+$operatori = [];
+try {
+    $operatori = $db->select("
+        SELECT id, CONCAT(nome, ' ', cognome) as nome_completo
+        FROM operatori
+        WHERE is_attivo = 1
+        ORDER BY cognome, nome
+    ");
+} catch (Exception $e) {
+    error_log("Errore caricamento operatori: " . $e->getMessage());
+}
+
+// Tipologie azienda disponibili
+$tipologieAzienda = [
+    'individuale' => 'Ditta Individuale',
+    'srl' => 'S.r.l. - Società a Responsabilità Limitata',
+    'spa' => 'S.p.A. - Società per Azioni',
+    'snc' => 'S.n.c. - Società in Nome Collettivo',
+    'sas' => 'S.a.s. - Società in Accomandita Semplice'
 ];
 
-// Decode qualifiche esistenti
-$qualificheEsistenti = json_decode($operatore['qualifiche'] ?? '[]', true) ?: [];
+// Stati disponibili
+$statiDisponibili = [
+    'attivo' => 'Attivo',
+    'sospeso' => 'Sospeso',
+    'chiuso' => 'Chiuso'
+];
 
-// **LOGICA ESISTENTE MANTENUTA** - Gestione form submission
+// Gestione form submission
 $errors = [];
 $success = false;
-$passwordChanged = false;
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     try {
-        $action = $_POST['action'] ?? 'update';
+        // Validazione campi obbligatori
+        $ragioneSociale = trim($_POST['ragione_sociale'] ?? '');
+        $tipologiaAzienda = $_POST['tipologia_azienda'] ?? '';
+        $codiceFiscale = trim($_POST['codice_fiscale'] ?? '');
+        $partitaIva = trim($_POST['partita_iva'] ?? '');
         
-        if ($action === 'update') {
-            // **LOGICA ESISTENTE MANTENUTA** - Aggiornamento dati generali
-            $cognome = trim($_POST['cognome'] ?? '');
-            $nome = trim($_POST['nome'] ?? '');
-            $email = trim($_POST['email'] ?? '');
-            $qualifiche = $_POST['qualifiche'] ?? [];
-            $tipoContratto = $_POST['tipo_contratto'] ?? '';
-            
-            // Solo admin può modificare questi campi
-            if ($isAdminEdit) {
-                $isAmministratore = isset($_POST['is_amministratore']) ? 1 : 0;
-                $isAttivo = isset($_POST['is_attivo']) ? 1 : 0;
-            } else {
-                $isAmministratore = $operatore['is_amministratore'];
-                $isAttivo = $operatore['is_attivo'];
+        // Validazioni base
+        if (empty($ragioneSociale)) {
+            $errors[] = "La ragione sociale è obbligatoria";
+        }
+        
+        if (empty($tipologiaAzienda)) {
+            $errors[] = "La tipologia azienda è obbligatoria";
+        }
+        
+        // Validazione CF/P.IVA in base al tipo
+        if ($tipologiaAzienda === 'individuale') {
+            if (empty($codiceFiscale)) {
+                $errors[] = "Il codice fiscale è obbligatorio per le ditte individuali";
+            } elseif (!preg_match('/^[A-Z]{6}[0-9]{2}[A-Z][0-9]{2}[A-Z][0-9]{3}[A-Z]$/i', $codiceFiscale)) {
+                $errors[] = "Il codice fiscale non è valido";
             }
-            
-            // Orari di lavoro
-            $orarioMattinoInizio = $_POST['orario_mattino_inizio'] ?? null;
-            $orarioMattinoFine = $_POST['orario_mattino_fine'] ?? null;
-            $orarioPomeriggioInizio = $_POST['orario_pomeriggio_inizio'] ?? null;
-            $orarioPomeriggioFine = $_POST['orario_pomeriggio_fine'] ?? null;
-            $orarioContinuatoInizio = $_POST['orario_continuato_inizio'] ?? null;
-            $orarioContinuatoFine = $_POST['orario_continuato_fine'] ?? null;
-            
-            // Validazioni
-            if (empty($cognome)) {
-                $errors[] = "Il cognome è obbligatorio";
+        } else {
+            if (empty($partitaIva)) {
+                $errors[] = "La partita IVA è obbligatoria per le società";
+            } elseif (!preg_match('/^[0-9]{11}$/', $partitaIva)) {
+                $errors[] = "La partita IVA deve contenere 11 cifre";
             }
-            
-            if (empty($nome)) {
-                $errors[] = "Il nome è obbligatorio";
-            }
-            
-            if (empty($email)) {
-                $errors[] = "L'email è obbligatoria";
-            } elseif (!filter_var($email, FILTER_VALIDATE_EMAIL)) {
-                $errors[] = "L'email non è valida";
-            }
-            
-            // Verifica email duplicata (escludendo operatore corrente)
-            if (empty($errors)) {
-                $existingUser = $db->selectOne(
-                    "SELECT id FROM operatori WHERE email = ? AND id != ?",
-                    [$email, $operatoreId]
+        }
+        
+        // Altri campi
+        $email = filter_var($_POST['email'] ?? '', FILTER_VALIDATE_EMAIL);
+        if ($_POST['email'] && !$email) {
+            $errors[] = "L'email non è valida";
+        }
+        
+        // Verifica duplicati (escludendo cliente corrente)
+        if (empty($errors)) {
+            if ($partitaIva) {
+                $existing = $db->selectOne(
+                    "SELECT id FROM clienti WHERE partita_iva = ? AND id != ?", 
+                    [$partitaIva, $clienteId]
                 );
-                
-                if ($existingUser) {
-                    $errors[] = "Email già presente nel sistema";
+                if ($existing) {
+                    $errors[] = "Esiste già un altro cliente con questa partita IVA";
                 }
             }
             
-            // Se non ci sono errori, procedi con l'aggiornamento
-            if (empty($errors)) {
-                $updateData = [
-                    'cognome' => $cognome,
-                    'nome' => $nome,
-                    'email' => $email,
-                    'qualifiche' => json_encode($qualifiche),
-                    'tipo_contratto' => $tipoContratto,
-                    'is_amministratore' => $isAmministratore,
-                    'is_attivo' => $isAttivo,
-                    'orario_mattino_inizio' => $orarioMattinoInizio,
-                    'orario_mattino_fine' => $orarioMattinoFine,
-                    'orario_pomeriggio_inizio' => $orarioPomeriggioInizio,
-                    'orario_pomeriggio_fine' => $orarioPomeriggioFine,
-                    'orario_continuato_inizio' => $orarioContinuatoInizio,
-                    'orario_continuato_fine' => $orarioContinuatoFine,
-                    'updated_at' => date('Y-m-d H:i:s')
-                ];
-                
-                $updated = $db->update('operatori', $updateData, 'id = ?', [$operatoreId]);
-                
-                if ($updated !== false) {
-                    $success = true;
-                    $_SESSION['success_message'] = "Operatore aggiornato con successo!";
-                    header('Location: /crm/?action=operatori&view=view&id=' . $operatoreId);
-                    exit;
-                } else {
-                    $errors[] = "Errore durante l'aggiornamento";
-                }
-            }
-            
-        } elseif ($action === 'change_password' && $_POST['new_password']) {
-            // Cambio password
-            $newPassword = $_POST['new_password'];
-            $confirmPassword = $_POST['confirm_password'];
-            
-            if (strlen($newPassword) < 8) {
-                $errors[] = "La password deve essere di almeno 8 caratteri";
-            } elseif ($newPassword !== $confirmPassword) {
-                $errors[] = "Le password non coincidono";
-            } else {
-                $passwordHash = password_hash($newPassword, PASSWORD_DEFAULT);
-                $updated = $db->update(
-                    'operatori', 
-                    ['password_hash' => $passwordHash, 'updated_at' => date('Y-m-d H:i:s')], 
-                    'id = ?', 
-                    [$operatoreId]
+            if ($codiceFiscale) {
+                $existing = $db->selectOne(
+                    "SELECT id FROM clienti WHERE codice_fiscale = ? AND id != ?", 
+                    [$codiceFiscale, $clienteId]
                 );
-                
-                if ($updated !== false) {
-                    $passwordChanged = true;
-                    $_SESSION['success_message'] = "Password aggiornata con successo!";
-                } else {
-                    $errors[] = "Errore durante l'aggiornamento della password";
+                if ($existing) {
+                    $errors[] = "Esiste già un altro cliente con questo codice fiscale";
                 }
             }
         }
         
-        // Ricarica dati operatore dopo modifiche
-        if ($success || $passwordChanged) {
-            $operatore = $db->selectOne("SELECT * FROM operatori WHERE id = ?", [$operatoreId]);
-            $qualificheEsistenti = json_decode($operatore['qualifiche'] ?? '[]', true) ?: [];
+        // Se non ci sono errori, procedi con l'aggiornamento
+        if (empty($errors)) {
+            // Prepara dati per aggiornamento
+            $updateData = [
+                'ragione_sociale' => $ragioneSociale,
+                'tipologia_azienda' => $tipologiaAzienda,
+                'codice_fiscale' => $codiceFiscale ?: null,
+                'partita_iva' => $partitaIva ?: null,
+                'indirizzo_sede' => trim($_POST['indirizzo_sede'] ?? ''),
+                'cap' => trim($_POST['cap'] ?? ''),
+                'citta' => trim($_POST['citta'] ?? ''),
+                'provincia' => strtoupper(trim($_POST['provincia'] ?? '')),
+                'telefono' => trim($_POST['telefono'] ?? ''),
+                'cellulare' => trim($_POST['cellulare'] ?? ''),
+                'email' => $email ?: null,
+                'pec' => trim($_POST['pec'] ?? ''),
+                'banca_appoggio' => trim($_POST['banca_appoggio'] ?? ''),
+                'iban' => trim($_POST['iban'] ?? ''),
+                'operatore_responsabile_id' => $_POST['operatore_responsabile_id'] ?: null,
+                'note_generali' => trim($_POST['note_generali'] ?? ''),
+                'stato' => $_POST['stato'] ?? 'attivo',
+                'is_attivo' => $_POST['stato'] === 'attivo' ? 1 : 0,
+                'updated_at' => date('Y-m-d H:i:s')
+            ];
+            
+            // Aggiorna nel database
+            $updated = $db->update('clienti', $updateData, 'id = ?', [$clienteId]);
+            
+            if ($updated !== false) {
+                $_SESSION['success_message'] = "Cliente aggiornato con successo!";
+                header('Location: /crm/?action=clienti&view=view&id=' . $clienteId);
+                exit;
+            } else {
+                $errors[] = "Errore durante l'aggiornamento del cliente";
+            }
+        }
+        
+        // Se ci sono errori, ricarica i dati dal POST per mantenere le modifiche
+        if (!empty($errors)) {
+            foreach ($_POST as $key => $value) {
+                if (isset($cliente[$key])) {
+                    $cliente[$key] = $value;
+                }
+            }
         }
         
     } catch (Exception $e) {
-        error_log("Errore aggiornamento operatore: " . $e->getMessage());
+        error_log("Errore aggiornamento cliente: " . $e->getMessage());
         $errors[] = "Errore di sistema. Riprova più tardi.";
     }
 }
@@ -234,7 +227,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             line-height: 1.4;
         }
         
-        /* Layout Container */
+        /* Layout */
         .edit-container {
             max-width: 900px;
             margin: 0 auto;
@@ -265,21 +258,23 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             padding: 1rem 1.5rem;
             border-radius: var(--radius-lg);
             margin-bottom: 1.5rem;
+        }
+        
+        .header-top {
             display: flex;
             justify-content: space-between;
-            align-items: center;
+            align-items: flex-start;
+            margin-bottom: 0.5rem;
         }
         
         .header-info {
-            display: flex;
-            flex-direction: column;
-            gap: 0.25rem;
+            flex: 1;
         }
         
         .page-title {
             font-size: 1.5rem;
             color: var(--gray-800);
-            margin: 0;
+            margin: 0 0 0.25rem 0;
             font-weight: 600;
         }
         
@@ -288,10 +283,22 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             color: var(--gray-600);
         }
         
-        /* Header Actions */
         .header-actions {
             display: flex;
             gap: 0.5rem;
+        }
+        
+        /* Cliente Badge */
+        .cliente-badge {
+            display: inline-flex;
+            align-items: center;
+            gap: 0.5rem;
+            padding: 0.25rem 0.75rem;
+            background: var(--gray-100);
+            border-radius: 100px;
+            font-size: 0.875rem;
+            color: var(--gray-700);
+            margin-bottom: 0.5rem;
         }
         
         /* Bottoni */
@@ -337,69 +344,15 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             background: var(--gray-50);
         }
         
-        .btn-danger {
-            background: var(--danger-red);
-            color: white;
-        }
-        
-        .btn-danger:hover {
-            background: #B91C1C;
-        }
-        
-        /* Tabs */
-        .tabs-container {
+        /* Form Container */
+        .form-container {
             background: white;
             border-radius: var(--radius-lg);
             box-shadow: var(--shadow-sm);
-            overflow: hidden;
-        }
-        
-        .tabs-header {
-            display: flex;
-            border-bottom: 2px solid var(--gray-200);
-        }
-        
-        .tab-button {
-            padding: 0.75rem 1.5rem;
-            background: none;
-            border: none;
-            font-size: 0.875rem;
-            font-weight: 500;
-            color: var(--gray-600);
-            cursor: pointer;
-            position: relative;
-            transition: var(--transition-fast);
-        }
-        
-        .tab-button:hover {
-            color: var(--gray-800);
-            background: var(--gray-50);
-        }
-        
-        .tab-button.active {
-            color: var(--primary-green);
-        }
-        
-        .tab-button.active::after {
-            content: '';
-            position: absolute;
-            bottom: -2px;
-            left: 0;
-            right: 0;
-            height: 2px;
-            background: var(--primary-green);
-        }
-        
-        .tab-content {
             padding: 1.5rem;
-            display: none;
         }
         
-        .tab-content.active {
-            display: block;
-        }
-        
-        /* Form Sections */
+        /* Sections */
         .form-section {
             margin-bottom: 1.5rem;
             padding-bottom: 1.5rem;
@@ -456,102 +409,35 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         }
         
         .form-input,
-        .form-select {
+        .form-select,
+        .form-textarea {
             padding: 0.5rem 0.75rem;
             border: 1px solid var(--gray-300);
             border-radius: var(--radius-sm);
             font-size: 0.875rem;
             width: 100%;
             transition: var(--transition-fast);
+            font-family: inherit;
         }
         
         .form-input:focus,
-        .form-select:focus {
+        .form-select:focus,
+        .form-textarea:focus {
             outline: none;
             border-color: var(--primary-green);
             box-shadow: 0 0 0 2px rgba(0,168,107,0.1);
         }
         
-        .form-input:disabled {
-            background: var(--gray-100);
-            cursor: not-allowed;
+        .form-textarea {
+            resize: vertical;
+            min-height: 100px;
         }
         
-        /* Checkbox Grid */
-        .checkbox-grid {
-            display: grid;
-            grid-template-columns: repeat(2, 1fr);
-            gap: 0.5rem;
-        }
-        
-        .checkbox-item {
-            display: flex;
-            align-items: center;
-            gap: 0.5rem;
-            padding: 0.25rem 0;
-        }
-        
-        .checkbox-item input[type="checkbox"] {
-            width: 16px;
-            height: 16px;
-            cursor: pointer;
-        }
-        
-        .checkbox-item label {
-            font-size: 0.875rem;
-            cursor: pointer;
-        }
-        
-        /* Switches */
-        .switch-field {
-            display: flex;
-            align-items: center;
-            gap: 0.75rem;
-            padding: 0.5rem 0;
-        }
-        
-        .switch {
-            position: relative;
-            width: 48px;
-            height: 24px;
-        }
-        
-        .switch input {
-            opacity: 0;
-            width: 0;
-            height: 0;
-        }
-        
-        .slider {
-            position: absolute;
-            cursor: pointer;
-            top: 0;
-            left: 0;
-            right: 0;
-            bottom: 0;
-            background-color: var(--gray-300);
-            transition: .3s;
-            border-radius: 24px;
-        }
-        
-        .slider:before {
-            position: absolute;
-            content: "";
-            height: 18px;
-            width: 18px;
-            left: 3px;
-            bottom: 3px;
-            background-color: white;
-            transition: .3s;
-            border-radius: 50%;
-        }
-        
-        input:checked + .slider {
-            background-color: var(--primary-green);
-        }
-        
-        input:checked + .slider:before {
-            transform: translateX(24px);
+        /* Help Text */
+        .form-help {
+            font-size: 0.75rem;
+            color: var(--gray-500);
+            margin-top: 0.25rem;
         }
         
         /* Form Actions */
@@ -564,38 +450,53 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             border-top: 1px solid var(--gray-200);
         }
         
-        /* Messages */
-        .alert {
+        /* Errors */
+        .error-container {
+            background: #FEF2F2;
+            border: 1px solid #FECACA;
+            color: #991B1B;
             padding: 0.75rem 1rem;
             border-radius: var(--radius-md);
             margin-bottom: 1rem;
             font-size: 0.875rem;
         }
         
-        .alert-success {
-            background: #D4EDDA;
-            color: #155724;
-            border: 1px solid #C3E6CB;
+        .error-container ul {
+            margin: 0.5rem 0 0 1.5rem;
+            padding: 0;
         }
         
-        .alert-error {
-            background: #F8D7DA;
-            color: #721C24;
-            border: 1px solid #F5C6CB;
-        }
-        
-        .alert-warning {
-            background: #FFF3CD;
-            color: #856404;
-            border: 1px solid #FFEAA7;
-        }
-        
-        /* Password Form */
-        .password-form {
-            background: var(--gray-50);
-            padding: 1rem;
+        /* Info Box */
+        .info-box {
+            background: #EFF6FF;
+            border: 1px solid #DBEAFE;
+            color: #1E40AF;
+            padding: 0.75rem 1rem;
             border-radius: var(--radius-md);
-            margin-top: 1rem;
+            margin-bottom: 1rem;
+            font-size: 0.875rem;
+        }
+        
+        /* Status Radio */
+        .status-options {
+            display: flex;
+            gap: 1rem;
+        }
+        
+        .status-option {
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+        }
+        
+        .status-option input[type="radio"] {
+            width: 16px;
+            height: 16px;
+        }
+        
+        .status-option label {
+            font-size: 0.875rem;
+            cursor: pointer;
         }
         
         /* Responsive */
@@ -608,14 +509,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 grid-template-columns: 1fr;
             }
             
-            .checkbox-grid {
-                grid-template-columns: 1fr;
-            }
-            
-            .page-header {
+            .header-top {
                 flex-direction: column;
                 gap: 1rem;
-                align-items: flex-start;
             }
             
             .header-actions {
@@ -634,37 +530,46 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         <!-- Breadcrumb -->
         <div class="breadcrumb">
             <a href="/crm/?action=dashboard">Dashboard</a> / 
-            <a href="/crm/?action=operatori">Operatori</a> / 
-            <span>Modifica: <?= htmlspecialchars($operatore['cognome'] . ' ' . $operatore['nome']) ?></span>
+            <a href="/crm/?action=clienti">Clienti</a> / 
+            <span>Modifica: <?= htmlspecialchars($cliente['ragione_sociale']) ?></span>
         </div>
         
         <!-- Header -->
         <header class="page-header">
-            <div class="header-info">
-                <h1 class="page-title">✏️ Modifica Operatore</h1>
-                <div class="page-subtitle">
-                    <?= htmlspecialchars($operatore['cognome'] . ' ' . $operatore['nome']) ?> - 
-                    <?= htmlspecialchars($operatore['email']) ?>
+            <div class="header-top">
+                <div class="header-info">
+                    <h1 class="page-title">✏️ Modifica Cliente</h1>
+                    <div class="cliente-badge">
+                        <span>📋</span>
+                        <span>Codice: <?= htmlspecialchars($cliente['codice_cliente']) ?></span>
+                    </div>
+                    <div class="page-subtitle">
+                        Creato il <?= date('d/m/Y', strtotime($cliente['created_at'])) ?>
+                        <?php if ($cliente['updated_at'] && $cliente['updated_at'] != $cliente['created_at']): ?>
+                            • Ultima modifica: <?= date('d/m/Y H:i', strtotime($cliente['updated_at'])) ?>
+                        <?php endif; ?>
+                    </div>
                 </div>
-            </div>
-            <div class="header-actions">
-                <a href="/crm/?action=operatori&view=view&id=<?= $operatoreId ?>" class="btn btn-secondary">
-                    👁️ Visualizza
-                </a>
-                <a href="/crm/?action=operatori" class="btn btn-outline">
-                    ← Lista Operatori
-                </a>
-                <a href="/crm/?action=dashboard" class="btn btn-outline">
-                    🏠 Dashboard
-                </a>
+                
+                <div class="header-actions">
+                    <a href="/crm/?action=clienti&view=view&id=<?= $clienteId ?>" class="btn btn-secondary">
+                        👁️ Visualizza
+                    </a>
+                    <a href="/crm/?action=clienti" class="btn btn-outline">
+                        ← Lista Clienti
+                    </a>
+                    <a href="/crm/?action=dashboard" class="btn btn-outline">
+                        🏠 Dashboard
+                    </a>
+                </div>
             </div>
         </header>
         
-        <!-- Messages -->
+        <!-- Errors -->
         <?php if (!empty($errors)): ?>
-            <div class="alert alert-error">
+            <div class="error-container">
                 <strong>⚠️ Si sono verificati i seguenti errori:</strong>
-                <ul style="margin: 0.5rem 0 0 1.5rem;">
+                <ul>
                     <?php foreach ($errors as $error): ?>
                         <li><?= htmlspecialchars($error) ?></li>
                     <?php endforeach; ?>
@@ -672,258 +577,305 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             </div>
         <?php endif; ?>
         
-        <?php if ($success || $passwordChanged): ?>
-            <div class="alert alert-success">
-                ✅ <?= $passwordChanged ? 'Password aggiornata con successo!' : 'Dati aggiornati con successo!' ?>
-            </div>
-        <?php endif; ?>
-        
-        <?php if ($isSelfEdit): ?>
-            <div class="alert alert-warning">
-                ⚠️ Stai modificando il tuo profilo. Alcuni campi potrebbero essere limitati.
-            </div>
-        <?php endif; ?>
-        
-        <!-- Tabs -->
-        <div class="tabs-container">
-            <div class="tabs-header">
-                <button class="tab-button active" onclick="switchTab('general')">
-                    📋 Dati Generali
-                </button>
-                <button class="tab-button" onclick="switchTab('password')">
-                    🔐 Cambia Password
-                </button>
-            </div>
-            
-            <!-- Tab Dati Generali -->
-            <div id="general-tab" class="tab-content active">
-                <form method="POST" action="/crm/?action=operatori&view=edit&id=<?= $operatoreId ?>">
-                    <input type="hidden" name="action" value="update">
+        <!-- Form -->
+        <div class="form-container">
+            <form method="POST" action="/crm/?action=clienti&view=edit&id=<?= $clienteId ?>">
+                <!-- Sezione 1: Dati Principali -->
+                <div class="form-section">
+                    <h2 class="section-title">
+                        <span>🏢</span> Dati Principali
+                    </h2>
                     
-                    <!-- Sezione 1: Dati Anagrafici -->
-                    <div class="form-section">
-                        <h2 class="section-title">
-                            <span>👤</span> Dati Anagrafici
-                        </h2>
+                    <div class="form-grid">
+                        <div class="form-field full-width">
+                            <label for="ragione_sociale" class="form-label required">Ragione Sociale</label>
+                            <input type="text" 
+                                   id="ragione_sociale" 
+                                   name="ragione_sociale" 
+                                   class="form-input" 
+                                   value="<?= htmlspecialchars($cliente['ragione_sociale']) ?>" 
+                                   required>
+                        </div>
                         
-                        <div class="form-grid">
-                            <div class="form-field">
-                                <label for="cognome" class="form-label required">Cognome</label>
-                                <input type="text" 
-                                       id="cognome" 
-                                       name="cognome" 
-                                       class="form-input" 
-                                       value="<?= htmlspecialchars($operatore['cognome']) ?>" 
-                                       required>
-                            </div>
-                            
-                            <div class="form-field">
-                                <label for="nome" class="form-label required">Nome</label>
-                                <input type="text" 
-                                       id="nome" 
-                                       name="nome" 
-                                       class="form-input" 
-                                       value="<?= htmlspecialchars($operatore['nome']) ?>" 
-                                       required>
-                            </div>
-                            
-                            <div class="form-field full-width">
-                                <label for="email" class="form-label required">Email</label>
-                                <input type="email" 
-                                       id="email" 
-                                       name="email" 
-                                       class="form-input" 
-                                       value="<?= htmlspecialchars($operatore['email']) ?>" 
-                                       required>
+                        <div class="form-field">
+                            <label for="tipologia_azienda" class="form-label required">Tipologia Azienda</label>
+                            <select id="tipologia_azienda" 
+                                    name="tipologia_azienda" 
+                                    class="form-select" 
+                                    required 
+                                    onchange="toggleFiscalFields()">
+                                <option value="">Seleziona...</option>
+                                <?php foreach ($tipologieAzienda as $key => $label): ?>
+                                    <option value="<?= $key ?>" <?= $cliente['tipologia_azienda'] === $key ? 'selected' : '' ?>>
+                                        <?= htmlspecialchars($label) ?>
+                                    </option>
+                                <?php endforeach; ?>
+                            </select>
+                        </div>
+                        
+                        <div class="form-field">
+                            <label for="operatore_responsabile_id" class="form-label">Operatore Responsabile</label>
+                            <select id="operatore_responsabile_id" name="operatore_responsabile_id" class="form-select">
+                                <option value="">Non assegnato</option>
+                                <?php foreach ($operatori as $op): ?>
+                                    <option value="<?= $op['id'] ?>" <?= $cliente['operatore_responsabile_id'] == $op['id'] ? 'selected' : '' ?>>
+                                        <?= htmlspecialchars($op['nome_completo']) ?>
+                                    </option>
+                                <?php endforeach; ?>
+                            </select>
+                        </div>
+                        
+                        <div class="form-field">
+                            <label for="stato" class="form-label">Stato Cliente</label>
+                            <div class="status-options">
+                                <?php foreach ($statiDisponibili as $key => $label): ?>
+                                    <div class="status-option">
+                                        <input type="radio" 
+                                               id="stato_<?= $key ?>" 
+                                               name="stato" 
+                                               value="<?= $key ?>"
+                                               <?= $cliente['stato'] === $key ? 'checked' : '' ?>>
+                                        <label for="stato_<?= $key ?>"><?= htmlspecialchars($label) ?></label>
+                                    </div>
+                                <?php endforeach; ?>
                             </div>
                         </div>
                     </div>
+                </div>
+                
+                <!-- Sezione 2: Dati Fiscali -->
+                <div class="form-section">
+                    <h2 class="section-title">
+                        <span>📋</span> Dati Fiscali
+                    </h2>
                     
-                    <!-- Sezione 2: Qualifiche e Competenze -->
-                    <div class="form-section">
-                        <h2 class="section-title">
-                            <span>🎯</span> Qualifiche e Competenze
-                        </h2>
-                        
-                        <div class="checkbox-grid">
-                            <?php foreach ($qualificheDisponibili as $qualifica): ?>
-                                <div class="checkbox-item">
-                                    <input type="checkbox" 
-                                           id="qual_<?= md5($qualifica) ?>" 
-                                           name="qualifiche[]" 
-                                           value="<?= htmlspecialchars($qualifica) ?>"
-                                           <?= in_array($qualifica, $qualificheEsistenti) ? 'checked' : '' ?>>
-                                    <label for="qual_<?= md5($qualifica) ?>">
-                                        <?= htmlspecialchars($qualifica) ?>
-                                    </label>
-                                </div>
-                            <?php endforeach; ?>
-                        </div>
-                    </div>
-                    
-                    <!-- Sezione 3: Orari di Lavoro -->
-                    <div class="form-section">
-                        <h2 class="section-title">
-                            <span>🕐</span> Orari di Lavoro
-                        </h2>
-                        
-                        <div class="form-grid three-columns">
-                            <div class="form-field">
-                                <label class="form-label">Tipo Contratto</label>
-                                <select name="tipo_contratto" class="form-select">
-                                    <option value="">Seleziona...</option>
-                                    <option value="full_time" <?= $operatore['tipo_contratto'] === 'full_time' ? 'selected' : '' ?>>Full Time</option>
-                                    <option value="part_time" <?= $operatore['tipo_contratto'] === 'part_time' ? 'selected' : '' ?>>Part Time</option>
-                                    <option value="collaborazione" <?= $operatore['tipo_contratto'] === 'collaborazione' ? 'selected' : '' ?>>Collaborazione</option>
-                                </select>
-                            </div>
-                            
-                            <div class="form-field">
-                                <label class="form-label">Mattino - Inizio</label>
-                                <input type="time" 
-                                       name="orario_mattino_inizio" 
-                                       class="form-input"
-                                       value="<?= htmlspecialchars($operatore['orario_mattino_inizio'] ?? '09:00') ?>">
-                            </div>
-                            
-                            <div class="form-field">
-                                <label class="form-label">Mattino - Fine</label>
-                                <input type="time" 
-                                       name="orario_mattino_fine" 
-                                       class="form-input"
-                                       value="<?= htmlspecialchars($operatore['orario_mattino_fine'] ?? '13:00') ?>">
-                            </div>
-                            
-                            <div class="form-field">
-                                <label class="form-label">Pomeriggio - Inizio</label>
-                                <input type="time" 
-                                       name="orario_pomeriggio_inizio" 
-                                       class="form-input"
-                                       value="<?= htmlspecialchars($operatore['orario_pomeriggio_inizio'] ?? '14:00') ?>">
-                            </div>
-                            
-                            <div class="form-field">
-                                <label class="form-label">Pomeriggio - Fine</label>
-                                <input type="time" 
-                                       name="orario_pomeriggio_fine" 
-                                       class="form-input"
-                                       value="<?= htmlspecialchars($operatore['orario_pomeriggio_fine'] ?? '18:00') ?>">
-                            </div>
-                        </div>
-                    </div>
-                    
-                    <!-- Sezione 4: Permessi (solo per admin) -->
-                    <?php if ($isAdminEdit): ?>
-                    <div class="form-section">
-                        <h2 class="section-title">
-                            <span>🔐</span> Permessi e Stato
-                        </h2>
-                        
-                        <div class="switch-field">
-                            <label class="switch">
-                                <input type="checkbox" 
-                                       name="is_amministratore"
-                                       <?= $operatore['is_amministratore'] ? 'checked' : '' ?>>
-                                <span class="slider"></span>
-                            </label>
-                            <label>Amministratore (accesso completo al sistema)</label>
+                    <div class="form-grid">
+                        <div class="form-field" id="cf-field">
+                            <label for="codice_fiscale" class="form-label">Codice Fiscale</label>
+                            <input type="text" 
+                                   id="codice_fiscale" 
+                                   name="codice_fiscale" 
+                                   class="form-input" 
+                                   value="<?= htmlspecialchars($cliente['codice_fiscale'] ?? '') ?>" 
+                                   maxlength="16"
+                                   style="text-transform: uppercase;">
+                            <span class="form-help">16 caratteri per persone fisiche</span>
                         </div>
                         
-                        <div class="switch-field">
-                            <label class="switch">
-                                <input type="checkbox" 
-                                       name="is_attivo"
-                                       <?= $operatore['is_attivo'] ? 'checked' : '' ?>>
-                                <span class="slider"></span>
-                            </label>
-                            <label>Attivo (può accedere al sistema)</label>
+                        <div class="form-field" id="piva-field">
+                            <label for="partita_iva" class="form-label">Partita IVA</label>
+                            <input type="text" 
+                                   id="partita_iva" 
+                                   name="partita_iva" 
+                                   class="form-input" 
+                                   value="<?= htmlspecialchars($cliente['partita_iva'] ?? '') ?>" 
+                                   maxlength="11">
+                            <span class="form-help">11 cifre</span>
                         </div>
                     </div>
-                    <?php endif; ?>
+                </div>
+                
+                <!-- Sezione 3: Sede Legale -->
+                <div class="form-section">
+                    <h2 class="section-title">
+                        <span>📍</span> Sede Legale
+                    </h2>
                     
-                    <!-- Form Actions -->
-                    <div class="form-actions">
-                        <div>
-                            <span class="form-label">* Campi obbligatori</span>
+                    <div class="form-grid">
+                        <div class="form-field full-width">
+                            <label for="indirizzo_sede" class="form-label">Indirizzo</label>
+                            <input type="text" 
+                                   id="indirizzo_sede" 
+                                   name="indirizzo_sede" 
+                                   class="form-input" 
+                                   value="<?= htmlspecialchars($cliente['indirizzo_sede'] ?? '') ?>">
                         </div>
-                        <div>
-                            <a href="/crm/?action=operatori" class="btn btn-secondary">
-                                ❌ Annulla
-                            </a>
-                            <button type="submit" class="btn btn-primary">
-                                💾 Salva Modifiche
-                            </button>
-                        </div>
-                    </div>
-                </form>
-            </div>
-            
-            <!-- Tab Password -->
-            <div id="password-tab" class="tab-content">
-                <form method="POST" action="/crm/?action=operatori&view=edit&id=<?= $operatoreId ?>">
-                    <input type="hidden" name="action" value="change_password">
-                    
-                    <div class="form-section">
-                        <h2 class="section-title">
-                            <span>🔑</span> Modifica Password
-                        </h2>
                         
-                        <div class="password-form">
-                            <div class="form-grid">
-                                <div class="form-field">
-                                    <label for="new_password" class="form-label required">Nuova Password</label>
-                                    <input type="password" 
-                                           id="new_password" 
-                                           name="new_password" 
-                                           class="form-input" 
-                                           required
-                                           minlength="8"
-                                           placeholder="Minimo 8 caratteri">
-                                </div>
-                                
-                                <div class="form-field">
-                                    <label for="confirm_password" class="form-label required">Conferma Password</label>
-                                    <input type="password" 
-                                           id="confirm_password" 
-                                           name="confirm_password" 
-                                           class="form-input" 
-                                           required
-                                           minlength="8"
-                                           placeholder="Ripeti la password">
-                                </div>
-                            </div>
-                            
-                            <div style="margin-top: 1rem;">
-                                <button type="submit" class="btn btn-primary">
-                                    🔐 Cambia Password
-                                </button>
-                            </div>
+                        <div class="form-field">
+                            <label for="cap" class="form-label">CAP</label>
+                            <input type="text" 
+                                   id="cap" 
+                                   name="cap" 
+                                   class="form-input" 
+                                   value="<?= htmlspecialchars($cliente['cap'] ?? '') ?>" 
+                                   maxlength="5">
+                        </div>
+                        
+                        <div class="form-field">
+                            <label for="citta" class="form-label">Città</label>
+                            <input type="text" 
+                                   id="citta" 
+                                   name="citta" 
+                                   class="form-input" 
+                                   value="<?= htmlspecialchars($cliente['citta'] ?? '') ?>">
+                        </div>
+                        
+                        <div class="form-field">
+                            <label for="provincia" class="form-label">Provincia</label>
+                            <input type="text" 
+                                   id="provincia" 
+                                   name="provincia" 
+                                   class="form-input" 
+                                   value="<?= htmlspecialchars($cliente['provincia'] ?? '') ?>" 
+                                   maxlength="2"
+                                   style="text-transform: uppercase;">
                         </div>
                     </div>
-                </form>
-            </div>
+                </div>
+                
+                <!-- Sezione 4: Contatti -->
+                <div class="form-section">
+                    <h2 class="section-title">
+                        <span>📞</span> Contatti
+                    </h2>
+                    
+                    <div class="form-grid">
+                        <div class="form-field">
+                            <label for="telefono" class="form-label">Telefono</label>
+                            <input type="tel" 
+                                   id="telefono" 
+                                   name="telefono" 
+                                   class="form-input" 
+                                   value="<?= htmlspecialchars($cliente['telefono'] ?? '') ?>">
+                        </div>
+                        
+                        <div class="form-field">
+                            <label for="cellulare" class="form-label">Cellulare</label>
+                            <input type="tel" 
+                                   id="cellulare" 
+                                   name="cellulare" 
+                                   class="form-input" 
+                                   value="<?= htmlspecialchars($cliente['cellulare'] ?? '') ?>">
+                        </div>
+                        
+                        <div class="form-field">
+                            <label for="email" class="form-label">Email</label>
+                            <input type="email" 
+                                   id="email" 
+                                   name="email" 
+                                   class="form-input" 
+                                   value="<?= htmlspecialchars($cliente['email'] ?? '') ?>">
+                        </div>
+                        
+                        <div class="form-field">
+                            <label for="pec" class="form-label">PEC</label>
+                            <input type="email" 
+                                   id="pec" 
+                                   name="pec" 
+                                   class="form-input" 
+                                   value="<?= htmlspecialchars($cliente['pec'] ?? '') ?>">
+                        </div>
+                    </div>
+                </div>
+                
+                <!-- Sezione 5: Dati Bancari -->
+                <div class="form-section">
+                    <h2 class="section-title">
+                        <span>🏦</span> Dati Bancari
+                    </h2>
+                    
+                    <div class="form-grid">
+                        <div class="form-field">
+                            <label for="banca_appoggio" class="form-label">Banca d'Appoggio</label>
+                            <input type="text" 
+                                   id="banca_appoggio" 
+                                   name="banca_appoggio" 
+                                   class="form-input" 
+                                   value="<?= htmlspecialchars($cliente['banca_appoggio'] ?? '') ?>">
+                        </div>
+                        
+                        <div class="form-field">
+                            <label for="iban" class="form-label">IBAN</label>
+                            <input type="text" 
+                                   id="iban" 
+                                   name="iban" 
+                                   class="form-input" 
+                                   value="<?= htmlspecialchars($cliente['iban'] ?? '') ?>" 
+                                   maxlength="27"
+                                   style="text-transform: uppercase;">
+                        </div>
+                    </div>
+                </div>
+                
+                <!-- Sezione 6: Note -->
+                <div class="form-section">
+                    <h2 class="section-title">
+                        <span>📝</span> Note e Informazioni Aggiuntive
+                    </h2>
+                    
+                    <div class="form-grid">
+                        <div class="form-field full-width">
+                            <label for="note_generali" class="form-label">Note Generali</label>
+                            <textarea id="note_generali" 
+                                      name="note_generali" 
+                                      class="form-textarea"><?= htmlspecialchars($cliente['note_generali'] ?? '') ?></textarea>
+                        </div>
+                    </div>
+                </div>
+                
+                <!-- Form Actions -->
+                <div class="form-actions">
+                    <div>
+                        <span class="form-label">* Campi obbligatori</span>
+                    </div>
+                    <div>
+                        <a href="/crm/?action=clienti" class="btn btn-secondary">
+                            ❌ Annulla
+                        </a>
+                        <button type="submit" class="btn btn-primary">
+                            💾 Salva Modifiche
+                        </button>
+                    </div>
+                </div>
+            </form>
         </div>
     </div>
     
     <script>
-        // Gestione tabs
-        function switchTab(tabName) {
-            // Nascondi tutti i tab
-            document.querySelectorAll('.tab-content').forEach(tab => {
-                tab.classList.remove('active');
-            });
+        // Toggle campi fiscali in base al tipo azienda
+        function toggleFiscalFields() {
+            const tipo = document.getElementById('tipologia_azienda').value;
+            const cfField = document.getElementById('cf-field');
+            const pivaField = document.getElementById('piva-field');
+            const cfInput = document.getElementById('codice_fiscale');
+            const pivaInput = document.getElementById('partita_iva');
             
-            // Rimuovi active da tutti i bottoni
-            document.querySelectorAll('.tab-button').forEach(btn => {
-                btn.classList.remove('active');
-            });
-            
-            // Mostra tab selezionato
-            document.getElementById(tabName + '-tab').classList.add('active');
-            
-            // Attiva bottone corrispondente
-            event.target.classList.add('active');
+            if (tipo === 'individuale') {
+                // Ditta individuale: CF obbligatorio, P.IVA opzionale
+                cfField.querySelector('.form-label').classList.add('required');
+                pivaField.querySelector('.form-label').classList.remove('required');
+                cfInput.required = true;
+                pivaInput.required = false;
+            } else if (tipo && tipo !== '') {
+                // Società: P.IVA obbligatoria, CF opzionale
+                cfField.querySelector('.form-label').classList.remove('required');
+                pivaField.querySelector('.form-label').classList.add('required');
+                cfInput.required = false;
+                pivaInput.required = true;
+            } else {
+                // Nessun tipo selezionato
+                cfField.querySelector('.form-label').classList.remove('required');
+                pivaField.querySelector('.form-label').classList.remove('required');
+                cfInput.required = false;
+                pivaInput.required = false;
+            }
         }
+        
+        // Formattazione automatica
+        document.getElementById('codice_fiscale').addEventListener('input', function(e) {
+            e.target.value = e.target.value.toUpperCase();
+        });
+        
+        document.getElementById('provincia').addEventListener('input', function(e) {
+            e.target.value = e.target.value.toUpperCase();
+        });
+        
+        document.getElementById('iban').addEventListener('input', function(e) {
+            e.target.value = e.target.value.toUpperCase().replace(/[^A-Z0-9]/g, '');
+        });
+        
+        // Inizializza campi al caricamento
+        toggleFiscalFields();
     </script>
 </body>
 </html>
