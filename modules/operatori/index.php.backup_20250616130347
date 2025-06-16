@@ -20,32 +20,23 @@
  * - Protezione JavaScript per API non ancora implementate
  */
 
-// Include bootstrap che gestisce l'autenticazione
-require_once dirname(dirname(__DIR__)) . '/core/bootstrap.php';
+// Avvia sessione se non già attiva
+if (session_status() === PHP_SESSION_NONE) {
+    session_start();
+}
 
-// Carica Database e helpers
-loadDatabase();
-loadHelpers();
+// Percorsi assoluti robusti per evitare problemi
+require_once $_SERVER['DOCUMENT_ROOT'] . '/crm/core/classes/Database.php';
+require_once $_SERVER['DOCUMENT_ROOT'] . '/crm/core/auth/AuthSystem.php';
+require_once $_SERVER['DOCUMENT_ROOT'] . '/crm/core/functions/helpers.php';
 
-// A questo punto siamo già autenticati (bootstrap ha verificato)
-// Ottieni info utente corrente
-$currentUser = getCurrentUser();
-if (!$currentUser) {
-    header('Location: ' . LOGIN_URL);
+// Verifica autenticazione
+if (!AuthSystem::isAuthenticated()) {
+    header('Location: /crm/core/auth/login.php');
     exit;
 }
 
-// Prepara sessionInfo nel formato che il modulo si aspetta
-$sessionInfo = [
-    'operatore_id' => $currentUser['id'],
-    'nome' => $currentUser['nome'],
-    'cognome' => $currentUser['cognome'],
-    'email' => $currentUser['email'],
-    'nome_completo' => $currentUser['nome'] . ' ' . $currentUser['cognome'],
-    'is_admin' => $currentUser['is_admin'],
-    'is_amministratore' => $currentUser['is_admin'] // alias
-];
-
+$sessionInfo = AuthSystem::getSessionInfo();
 $db = Database::getInstance();
 
 // Verifica permessi amministratore per alcune azioni
