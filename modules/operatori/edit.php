@@ -2,46 +2,22 @@
 /**
  * modules/operatori/edit.php - Modifica Operatore CRM Re.De Consulting
  * 
- * ✅ LAYOUT ULTRA-DENSO UNIFORME v2.0 - OPERATORI-FRIENDLY
- * 
- * Features:
- * - Layout identico alla dashboard per uniformità totale
- * - Form modifica con controlli permessi avanzati
- * - Auto-edit e admin-edit supportati
- * - MANTENIMENTO TOTALE della logica esistente
- * - Design system Datev Koinos compliant
+ * ✅ VERSIONE AGGIORNATA CON ROUTER
  */
 
-// **LOGICA ESISTENTE MANTENUTA** - Avvia sessione se non già attiva
-if (session_status() === PHP_SESSION_NONE) {
-    session_start();
-}
-
-// Percorsi assoluti per evitare problemi
-require_once $_SERVER['DOCUMENT_ROOT'] . '/crm/core/classes/Database.php';
-require_once $_SERVER['DOCUMENT_ROOT'] . '/crm/core/auth/AuthSystem.php';
-require_once $_SERVER['DOCUMENT_ROOT'] . '/crm/core/functions/helpers.php';
-
-// **LOGICA ESISTENTE MANTENUTA** - Verifica autenticazione
-if (!AuthSystem::isAuthenticated()) {
-    header('Location: /crm/core/auth/login.php');
+// Verifica che siamo passati dal router
+if (!defined('OPERATORI_ROUTER_LOADED')) {
+    header('Location: /crm/?action=operatori');
     exit;
 }
 
-$sessionInfo = AuthSystem::getSessionInfo();
-$db = Database::getInstance();
-
-// **LOGICA ESISTENTE MANTENUTA** - Recupera ID operatore da modificare
-$operatoreId = $_GET['id'] ?? null;
-if (!$operatoreId) {
-    header('Location: /crm/modules/operatori/?error=missing_id');
-    exit;
-}
+// Recupera ID operatore da modificare (già validato dal router)
+$operatoreId = $_GET['id'];
 
 // Recupera dati operatore
 $operatore = $db->selectOne("SELECT * FROM operatori WHERE id = ?", [$operatoreId]);
 if (!$operatore) {
-    header('Location: /crm/modules/operatori/?error=not_found');
+    header('Location: /crm/?action=operatori&error=not_found');
     exit;
 }
 
@@ -51,7 +27,7 @@ $isAdminEdit = $sessionInfo['is_admin'] && $sessionInfo['operatore_id'] != $oper
 $isSelfEdit = $sessionInfo['operatore_id'] == $operatoreId;
 
 if (!$canEdit) {
-    header('Location: /crm/modules/operatori/?error=permissions');
+    header('Location: /crm/?action=operatori&error=permissions');
     exit;
 }
 
@@ -90,108 +66,139 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $cognome = trim($_POST['cognome'] ?? '');
             $nome = trim($_POST['nome'] ?? '');
             $email = trim($_POST['email'] ?? '');
+            $telefono = trim($_POST['telefono'] ?? '');
             $qualifiche = $_POST['qualifiche'] ?? [];
             $tipoContratto = $_POST['tipo_contratto'] ?? '';
             
-            // Permessi admin
-            $isAmministratore = $isAdminEdit && isset($_POST['is_amministratore']) ? 1 : $operatore['is_amministratore'];
-            $isAttivo = $isAdminEdit && isset($_POST['is_attivo']) ? 1 : $operatore['is_attivo'];
-            
-            // Orari di lavoro
+            // Orari
             $orarioMattinoInizio = $_POST['orario_mattino_inizio'] ?? null;
             $orarioMattinoFine = $_POST['orario_mattino_fine'] ?? null;
             $orarioPomeriggioInizio = $_POST['orario_pomeriggio_inizio'] ?? null;
             $orarioPomeriggioFine = $_POST['orario_pomeriggio_fine'] ?? null;
             $orarioContinuatoInizio = $_POST['orario_continuato_inizio'] ?? null;
             $orarioContinuatoFine = $_POST['orario_continuato_fine'] ?? null;
-
-            // Validazioni
-            if (empty($cognome)) $errors[] = 'Il cognome è obbligatorio';
-            if (empty($nome)) $errors[] = 'Il nome è obbligatorio';
-            if (empty($email)) $errors[] = 'L\'email è obbligatoria';
-            if (!filter_var($email, FILTER_VALIDATE_EMAIL)) $errors[] = 'Email non valida';
-            if (empty($tipoContratto)) $errors[] = 'Il tipo di contratto è obbligatorio';
-
-            // Verifica email duplicata (escludendo l'operatore corrente)
-            if (!empty($email)) {
-                $emailExists = $db->selectOne("SELECT id FROM operatori WHERE email = ? AND id != ?", [$email, $operatoreId]);
-                if ($emailExists) {
-                    $errors[] = 'Email già utilizzata da un altro operatore';
-                }
+            
+            // **LOGICA ESISTENTE MANTENUTA** - Solo admin può modificare questi campi
+            if ($isAdminEdit) {
+                $isAmministratore = isset($_POST['is_amministratore']) ? 1 : 0;
+                $isAttivo = isset($_POST['is_attivo']) ? 1 : 0;
+            } else {
+                $isAmministratore = $operatore['is_amministratore'];
+                $isAttivo = $operatore['is_attivo'];
             }
-
-            // Se nessun errore, procedi con aggiornamento
+            
+            // Validazione
+            if (empty($cognome)) {
+                $errors[] = "Il cognome è obbligatorio";
+            }
+            
+            if (empty($nome)) {
+                $errors[] = "Il nome è obbligatorio";
+            }
+            
+            if (empty($email)) {
+                $errors[] = "L'email è obbligatoria";
+            } elseif (!filter_var($email, FILTER_VALIDATE_EMAIL)) {
+                $errors[] = "L'email non è valida";
+            }
+            
+            // Verifica email unica (escluso operatore corrente)
             if (empty($errors)) {
-                $qualificheJson = json_encode($qualifiche);
-                
-                $updated = $db->update(
-                    "UPDATE operatori SET 
-                        cognome = ?, nome = ?, email = ?, qualifiche = ?, tipo_contratto = ?,
-                        orario_mattino_inizio = ?, orario_mattino_fine = ?,
-                        orario_pomeriggio_inizio = ?, orario_pomeriggio_fine = ?,
-                        orario_continuato_inizio = ?, orario_continuato_fine = ?,
-                        is_amministratore = ?, is_attivo = ?, updated_at = NOW()
-                    WHERE id = ?",
-                    [
-                        $cognome, $nome, $email, $qualificheJson, $tipoContratto,
-                        $tipoContratto === 'spezzato' ? $orarioMattinoInizio : null,
-                        $tipoContratto === 'spezzato' ? $orarioMattinoFine : null,
-                        $tipoContratto === 'spezzato' ? $orarioPomeriggioInizio : null,
-                        $tipoContratto === 'spezzato' ? $orarioPomeriggioFine : null,
-                        $tipoContratto === 'continuato' ? $orarioContinuatoInizio : null,
-                        $tipoContratto === 'continuato' ? $orarioContinuatoFine : null,
-                        $isAmministratore, $isAttivo, $operatoreId
-                    ]
+                $exists = $db->selectOne(
+                    "SELECT id FROM operatori WHERE email = ? AND id != ?", 
+                    [$email, $operatoreId]
                 );
-                
-                if ($updated) {
-                    $success = true;
-                    // Ricarica dati aggiornati
-                    $operatore = $db->selectOne("SELECT * FROM operatori WHERE id = ?", [$operatoreId]);
-                    $qualificheEsistenti = json_decode($operatore['qualifiche'] ?? '[]', true) ?: [];
+                if ($exists) {
+                    $errors[] = "Email già utilizzata da un altro operatore";
                 }
             }
             
-        } elseif ($action === 'change_password') {
-            // **LOGICA ESISTENTE MANTENUTA** - Cambio password
+            // Se nessun errore, procedi con l'aggiornamento
+            if (empty($errors)) {
+                $updateData = [
+                    'cognome' => $cognome,
+                    'nome' => $nome,
+                    'email' => $email,
+                    'telefono' => $telefono,
+                    'qualifiche' => json_encode($qualifiche),
+                    'tipo_contratto' => $tipoContratto,
+                    'orario_mattino_inizio' => $orarioMattinoInizio,
+                    'orario_mattino_fine' => $orarioMattinoFine,
+                    'orario_pomeriggio_inizio' => $orarioPomeriggioInizio,
+                    'orario_pomeriggio_fine' => $orarioPomeriggioFine,
+                    'orario_continuato_inizio' => $orarioContinuatoInizio,
+                    'orario_continuato_fine' => $orarioContinuatoFine,
+                    'updated_at' => date('Y-m-d H:i:s')
+                ];
+                
+                // Solo admin può modificare questi campi
+                if ($isAdminEdit) {
+                    $updateData['is_amministratore'] = $isAmministratore;
+                    $updateData['is_attivo'] = $isAttivo;
+                }
+                
+                $db->update('operatori', $updateData, 'id = ?', [$operatoreId]);
+                
+                // Log modifica
+                $db->insert('auth_log', [
+                    'user_id' => $sessionInfo['operatore_id'],
+                    'action' => 'update_operator',
+                    'ip_address' => $_SERVER['REMOTE_ADDR'] ?? '',
+                    'user_agent' => $_SERVER['HTTP_USER_AGENT'] ?? '',
+                    'additional_data' => json_encode([
+                        'operatore_modificato_id' => $operatoreId,
+                        'modifiche' => array_keys($updateData)
+                    ])
+                ]);
+                
+                $success = true;
+                $_SESSION['success_message'] = "Dati operatore aggiornati con successo!";
+                header('Location: /crm/?action=operatori&view=view&id=' . $operatoreId . '&success=updated');
+                exit;
+            }
+            
+        } elseif ($action === 'change_password' && $isSelfEdit) {
+            // **LOGICA ESISTENTE MANTENUTA** - Cambio password (solo per sé stessi)
             $currentPassword = $_POST['current_password'] ?? '';
             $newPassword = $_POST['new_password'] ?? '';
             $confirmPassword = $_POST['confirm_password'] ?? '';
             
-            // Validazioni password
-            if ($isSelfEdit && !password_verify($currentPassword, $operatore['password'])) {
-                $errors[] = 'Password attuale non corretta';
-            }
-            
-            if (strlen($newPassword) < 8) {
-                $errors[] = 'La nuova password deve essere di almeno 8 caratteri';
-            }
-            
-            if ($newPassword !== $confirmPassword) {
-                $errors[] = 'Le password non coincidono';
+            if (empty($currentPassword) || empty($newPassword) || empty($confirmPassword)) {
+                $errors[] = "Tutti i campi password sono obbligatori";
+            } elseif ($newPassword !== $confirmPassword) {
+                $errors[] = "Le nuove password non coincidono";
+            } elseif (strlen($newPassword) < 8) {
+                $errors[] = "La password deve essere di almeno 8 caratteri";
+            } elseif (!password_verify($currentPassword, $operatore['password_hash'])) {
+                $errors[] = "Password attuale non corretta";
             }
             
             if (empty($errors)) {
-                $passwordHash = password_hash($newPassword, PASSWORD_ARGON2ID);
+                $newHash = password_hash($newPassword, PASSWORD_DEFAULT);
+                $db->update('operatori', [
+                    'password_hash' => $newHash,
+                    'updated_at' => date('Y-m-d H:i:s')
+                ], 'id = ?', [$operatoreId]);
                 
-                $updated = $db->update(
-                    "UPDATE operatori SET password = ?, updated_at = NOW() WHERE id = ?",
-                    [$passwordHash, $operatoreId]
-                );
+                // Log cambio password
+                $db->insert('auth_log', [
+                    'user_id' => $operatoreId,
+                    'action' => 'password_change',
+                    'ip_address' => $_SERVER['REMOTE_ADDR'] ?? '',
+                    'user_agent' => $_SERVER['HTTP_USER_AGENT'] ?? ''
+                ]);
                 
-                if ($updated) {
-                    $passwordChanged = true;
-                }
+                $passwordChanged = true;
+                $success = true;
             }
         }
         
     } catch (Exception $e) {
-        $errors[] = 'Errore durante l\'aggiornamento: ' . $e->getMessage();
         error_log("Errore modifica operatore: " . $e->getMessage());
+        $errors[] = "Errore durante la modifica. Riprova più tardi.";
     }
 }
 ?>
-
 <!DOCTYPE html>
 <html lang="it">
 <head>
@@ -199,20 +206,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Modifica Operatore - CRM Re.De Consulting</title>
     
-    <!-- CSS Sistema Uniforme -->
-    <link rel="stylesheet" href="/crm/assets/css/datev-style.css">
-    <link rel="stylesheet" href="/crm/assets/css/responsive.css">
-    
     <style>
-        /* === LAYOUT ULTRA-DENSO UNIFORME - IDENTICO DASHBOARD === */
-        
-        /* Variabili CSS Uniformi - IDENTICHE */
+        /* Stessi stili di create.php */
         :root {
-            --sidebar-width: 200px;
-            --header-height: 60px;
-            --primary-green: #2c6e49;
-            --secondary-green: #4a9d6f;
-            --accent-blue: #1e40af;
+            --primary-blue: #194F8B;
+            --secondary-green: #97BC5B;
+            --accent-orange: #FF7F41;
             --gray-50: #f9fafb;
             --gray-100: #f3f4f6;
             --gray-200: #e5e7eb;
@@ -223,910 +222,834 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             --gray-700: #374151;
             --gray-800: #1f2937;
             --gray-900: #111827;
-            --danger-red: #dc2626;
-            --warning-yellow: #d97706;
-            --success-green: #059669;
-            --radius-md: 6px;
-            --radius-lg: 8px;
-            --radius-xl: 12px;
-            --shadow-sm: 0 1px 2px 0 rgba(0, 0, 0, 0.05);
-            --shadow-md: 0 4px 6px -1px rgba(0, 0, 0, 0.1);
-            --font-size-xs: 0.75rem;
-            --font-size-sm: 0.875rem;
-            --font-size-base: 1rem;
-            --font-size-lg: 1.125rem;
+            --success-green: #22c55e;
+            --warning-yellow: #f59e0b;
+            --danger-red: #ef4444;
+            --radius-sm: 0.25rem;
+            --radius-md: 0.375rem;
+            --radius-lg: 0.5rem;
+            --transition-fast: 150ms ease;
         }
-
-        /* Layout Principale Identico */
-        .app-layout {
-            display: flex;
-            min-height: 100vh;
-            background: var(--gray-50);
-        }
-
-        .sidebar {
-            width: var(--sidebar-width);
-            background: white;
-            border-right: 1px solid var(--gray-200);
-            position: fixed;
-            height: 100vh;
-            overflow-y: auto;
-            z-index: 10;
-        }
-
-        .nav {
-            padding: 1rem 0;
-        }
-
-        .nav-section {
-            margin-bottom: 1rem;
-        }
-
-        .nav-item {
-            margin: 0.25rem 0;
-        }
-
-        .nav-link {
-            display: flex;
-            align-items: center;
-            gap: 0.75rem;
-            padding: 0.75rem 1rem;
-            color: var(--gray-700);
-            text-decoration: none;
-            font-size: var(--font-size-sm);
-            border-radius: 0;
-            transition: all 0.2s ease;
-        }
-
-        .nav-link:hover {
-            background: var(--gray-50);
-            color: var(--primary-green);
-        }
-
-        .nav-link.active {
-            background: var(--primary-green);
-            color: white;
-        }
-
-        .nav-icon {
-            font-size: 1.1rem;
-            width: 20px;
-            text-align: center;
-        }
-
-        .nav-badge {
-            background: var(--accent-blue);
-            color: white;
-            font-size: 0.6rem;
-            padding: 0.15rem 0.4rem;
-            border-radius: 10px;
-            margin-left: auto;
-        }
-
-        .main-content {
-            flex: 1;
-            margin-left: var(--sidebar-width);
-            display: flex;
-            flex-direction: column;
-        }
-
-        .app-header {
-            height: var(--header-height);
-            background: white;
-            border-bottom: 1px solid var(--gray-200);
-            display: flex;
-            align-items: center;
-            justify-content: space-between;
-            padding: 0 2rem;
-            position: sticky;
-            top: 0;
-            z-index: 5;
-        }
-
-        .header-left {
-            display: flex;
-            align-items: center;
-            gap: 1rem;
-        }
-
-        .sidebar-toggle {
-            display: none;
-            background: none;
-            border: none;
-            color: var(--gray-600);
-            cursor: pointer;
-            padding: 0.5rem;
-        }
-
-        .page-title {
-            font-size: var(--font-size-lg);
-            font-weight: 600;
-            color: var(--gray-800);
+        
+        * {
+            box-sizing: border-box;
             margin: 0;
+            padding: 0;
         }
-
-        .header-right {
-            display: flex;
-            align-items: center;
-            gap: 1rem;
+        
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+            background: var(--gray-50);
+            color: var(--gray-900);
+            font-size: 0.875rem;
+            line-height: 1.5;
         }
-
-        .work-timer {
+        
+        /* Container principale */
+        .edit-container {
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 1rem;
+        }
+        
+        /* Breadcrumb */
+        .breadcrumb {
             display: flex;
             align-items: center;
             gap: 0.5rem;
-            background: var(--primary-green);
-            color: white;
-            padding: 0.5rem 1rem;
-            border-radius: var(--radius-md);
-            font-size: var(--font-size-sm);
-            font-weight: 500;
-            box-shadow: var(--shadow-sm);
+            padding: 0.5rem 0;
+            font-size: 0.875rem;
+            color: var(--gray-600);
         }
-
-        .timer-icon {
-            font-size: 1rem;
+        
+        .breadcrumb a {
+            color: var(--primary-blue);
+            text-decoration: none;
         }
-
-        .time-display {
-            font-family: 'Courier New', monospace;
-            font-weight: 600;
+        
+        .breadcrumb a:hover {
+            text-decoration: underline;
         }
-
-        .user-menu {
-            position: relative;
-        }
-
-        .user-avatar {
-            width: 36px;
-            height: 36px;
-            background: var(--gray-600);
-            color: white;
-            border-radius: 50%;
+        
+        /* Header */
+        .main-header {
+            background: white;
+            border-radius: var(--radius-lg);
+            padding: 1rem 1.5rem;
+            margin-bottom: 1.5rem;
+            box-shadow: 0 1px 3px rgba(0, 0, 0, 0.05);
             display: flex;
+            justify-content: space-between;
             align-items: center;
-            justify-content: center;
+        }
+        
+        .header-left h1 {
+            font-size: 1.25rem;
             font-weight: 600;
+            color: var(--gray-800);
+        }
+        
+        .header-info {
+            font-size: 0.875rem;
+            color: var(--gray-600);
+            margin-top: 0.25rem;
+        }
+        
+        .header-actions {
+            display: flex;
+            gap: 0.5rem;
+        }
+        
+        /* Tabs */
+        .tabs {
+            display: flex;
+            gap: 0.5rem;
+            border-bottom: 1px solid var(--gray-200);
+            margin-bottom: 2rem;
+            background: white;
+            padding: 0 1rem;
+            border-radius: var(--radius-lg) var(--radius-lg) 0 0;
+        }
+        
+        .tab-button {
+            padding: 0.75rem 1.5rem;
+            background: none;
+            border: none;
+            border-bottom: 2px solid transparent;
+            font-size: 0.875rem;
+            font-weight: 500;
+            color: var(--gray-600);
             cursor: pointer;
-            font-size: var(--font-size-sm);
+            transition: all var(--transition-fast);
         }
-
-        /* Content Layout */
-        .content-container {
-            padding: 2rem;
-            max-width: 1200px;
-            margin: 0 auto;
-            width: 100%;
+        
+        .tab-button:hover {
+            color: var(--gray-900);
         }
-
-        .edit-container {
-            display: grid;
-            grid-template-columns: 2fr 1fr;
-            gap: 2rem;
+        
+        .tab-button.active {
+            color: var(--primary-blue);
+            border-bottom-color: var(--primary-blue);
         }
-
+        
+        .tab-content {
+            display: none;
+        }
+        
+        .tab-content.active {
+            display: block;
+        }
+        
+        /* Form styles (riusa da create.php) */
         .form-container {
             background: white;
-            border-radius: var(--radius-xl);
-            box-shadow: var(--shadow-sm);
-            border: 1px solid var(--gray-200);
-            overflow: hidden;
+            border-radius: 0 0 var(--radius-lg) var(--radius-lg);
+            padding: 2rem;
+            box-shadow: 0 1px 3px rgba(0, 0, 0, 0.05);
         }
-
-        .form-header {
+        
+        /* Altri stili copiati da create.php... */
+        .btn {
+            padding: 0.5rem 1rem;
+            border-radius: var(--radius-md);
+            font-size: 0.875rem;
+            font-weight: 500;
+            text-decoration: none;
+            display: inline-flex;
+            align-items: center;
+            gap: 0.375rem;
+            transition: all var(--transition-fast);
+            border: 1px solid transparent;
+            cursor: pointer;
+            background: white;
+        }
+        
+        .btn-primary {
+            background: var(--primary-blue);
+            color: white;
+            border-color: var(--primary-blue);
+        }
+        
+        .btn-primary:hover {
+            background: #16406e;
+        }
+        
+        .btn-secondary {
+            background: white;
+            color: var(--gray-700);
+            border-color: var(--gray-300);
+        }
+        
+        .btn-secondary:hover {
             background: var(--gray-50);
-            padding: 1.5rem;
+            border-color: var(--gray-400);
+        }
+        
+        .btn-outline {
+            background: transparent;
+            color: var(--gray-700);
+            border-color: var(--gray-300);
+        }
+        
+        .btn-outline:hover {
+            background: var(--gray-50);
+        }
+        
+        /* Form Grid Layout */
+        .form-grid {
+            display: grid;
+            grid-template-columns: repeat(2, 1fr);
+            gap: 1.5rem;
+        }
+        
+        .form-section {
+            margin-bottom: 2rem;
+        }
+        
+        .section-title {
+            font-size: 1rem;
+            font-weight: 600;
+            color: var(--gray-800);
+            margin-bottom: 1rem;
+            padding-bottom: 0.5rem;
             border-bottom: 1px solid var(--gray-200);
         }
-
-        .form-header h3 {
-            margin: 0 0 0.5rem 0;
-            color: var(--gray-800);
-            font-size: var(--font-size-lg);
-        }
-
-        .form-header p {
-            margin: 0;
-            color: var(--gray-500);
-            font-size: var(--font-size-sm);
-        }
-
-        .form-content {
-            padding: 1.5rem;
-        }
-
-        /* Info Badge */
-        .info-badge {
-            background: var(--accent-blue);
-            color: white;
-            padding: 0.75rem 1rem;
-            border-radius: var(--radius-lg);
-            margin-bottom: 2rem;
-            font-size: var(--font-size-sm);
-            text-align: center;
-        }
-
-        /* Alert Messages */
-        .alert {
-            padding: 1rem 1.5rem;
-            border-radius: var(--radius-lg);
-            margin-bottom: 1.5rem;
-        }
-
-        .alert-danger {
-            background: #fef2f2;
-            border: 1px solid #fecaca;
-            color: #991b1b;
-        }
-
-        .alert-success {
-            background: #f0fdf4;
-            border: 1px solid #bbf7d0;
-            color: #166534;
-        }
-
-        .alert h4 {
-            margin: 0 0 0.5rem 0;
-            font-weight: 600;
-        }
-
-        .alert ul {
-            margin: 0;
-            padding-left: 1.5rem;
-        }
-
-        /* Form Elements */
-        .form-row {
-            display: grid;
-            grid-template-columns: 1fr 1fr;
-            gap: 1rem;
-            margin-bottom: 1rem;
-        }
-
+        
+        /* Form Controls */
         .form-group {
             margin-bottom: 1rem;
         }
-
-        .form-group.full-width {
-            grid-column: 1 / -1;
-        }
-
+        
         .form-label {
             display: block;
-            font-weight: 600;
+            font-weight: 500;
             color: var(--gray-700);
-            margin-bottom: 0.5rem;
-            font-size: var(--font-size-sm);
+            margin-bottom: 0.375rem;
+            font-size: 0.875rem;
         }
-
+        
+        .form-label .required {
+            color: var(--danger-red);
+            margin-left: 0.25rem;
+        }
+        
         .form-control {
             width: 100%;
-            padding: 0.75rem;
+            padding: 0.5rem 0.75rem;
             border: 1px solid var(--gray-300);
             border-radius: var(--radius-md);
-            font-size: var(--font-size-sm);
-            transition: border-color 0.2s ease;
+            font-size: 0.875rem;
+            transition: all var(--transition-fast);
         }
-
+        
         .form-control:focus {
             outline: none;
-            border-color: var(--primary-green);
-            box-shadow: 0 0 0 3px rgba(44, 110, 73, 0.1);
+            border-color: var(--primary-blue);
+            box-shadow: 0 0 0 3px rgba(25, 79, 139, 0.1);
         }
-
-        /* Qualifiche Checkboxes */
-        .qualifiche-grid {
+        
+        .form-control:disabled {
+            background: var(--gray-100);
+            color: var(--gray-500);
+            cursor: not-allowed;
+        }
+        
+        .form-hint {
+            margin-top: 0.25rem;
+            font-size: 0.75rem;
+            color: var(--gray-500);
+        }
+        
+        /* Checkboxes */
+        .checkbox-group {
             display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            grid-template-columns: repeat(2, 1fr);
             gap: 0.5rem;
-            margin-top: 0.5rem;
+            max-height: 200px;
+            overflow-y: auto;
+            padding: 0.5rem;
+            border: 1px solid var(--gray-200);
+            border-radius: var(--radius-md);
+            background: var(--gray-50);
         }
-
+        
         .checkbox-item {
             display: flex;
             align-items: center;
             gap: 0.5rem;
-            padding: 0.5rem;
-            background: var(--gray-50);
-            border-radius: var(--radius-md);
-            font-size: var(--font-size-sm);
         }
-
+        
         .checkbox-item input[type="checkbox"] {
             width: 16px;
             height: 16px;
+            cursor: pointer;
         }
-
-        /* Orari Section */
-        .orari-section {
-            display: none;
-            margin-top: 1rem;
-            padding: 1rem;
-            background: var(--gray-50);
-            border-radius: var(--radius-lg);
+        
+        .checkbox-item label {
+            font-size: 0.875rem;
+            color: var(--gray-700);
+            cursor: pointer;
+            user-select: none;
         }
-
-        .orari-section.active {
-            display: block;
+        
+        /* Switch Toggle */
+        .switch-group {
+            display: flex;
+            align-items: center;
+            gap: 0.75rem;
         }
-
-        .orari-row {
+        
+        .switch {
+            position: relative;
+            display: inline-block;
+            width: 48px;
+            height: 24px;
+        }
+        
+        .switch input {
+            opacity: 0;
+            width: 0;
+            height: 0;
+        }
+        
+        .slider {
+            position: absolute;
+            cursor: pointer;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background-color: var(--gray-300);
+            transition: .4s;
+            border-radius: 24px;
+        }
+        
+        .slider:before {
+            position: absolute;
+            content: "";
+            height: 16px;
+            width: 16px;
+            left: 4px;
+            bottom: 4px;
+            background-color: white;
+            transition: .4s;
+            border-radius: 50%;
+        }
+        
+        input:checked + .slider {
+            background-color: var(--primary-blue);
+        }
+        
+        input:checked + .slider:before {
+            transform: translateX(24px);
+        }
+        
+        /* Disabled switch */
+        .switch input:disabled + .slider {
+            background-color: var(--gray-200);
+            cursor: not-allowed;
+        }
+        
+        /* Time inputs */
+        .time-inputs {
             display: grid;
-            grid-template-columns: 1fr 1fr;
-            gap: 1rem;
+            grid-template-columns: 1fr auto 1fr;
+            gap: 0.5rem;
+            align-items: center;
+        }
+        
+        .time-separator {
+            color: var(--gray-500);
+            font-weight: 500;
+        }
+        
+        /* Error Messages */
+        .alert {
+            padding: 0.75rem 1rem;
+            border-radius: var(--radius-md);
             margin-bottom: 1rem;
         }
-
-        /* Buttons */
-        .btn {
-            display: inline-flex;
-            align-items: center;
-            gap: 0.5rem;
-            padding: 0.75rem 1.5rem;
-            border: none;
-            border-radius: var(--radius-md);
-            font-size: var(--font-size-sm);
-            font-weight: 500;
-            text-decoration: none;
-            cursor: pointer;
-            transition: all 0.2s ease;
+        
+        .alert-error {
+            background: #fee2e2;
+            color: #dc2626;
+            border: 1px solid #fecaca;
         }
-
-        .btn-primary {
-            background: var(--primary-green);
-            color: white;
+        
+        .alert-success {
+            background: #dcfce7;
+            color: #16a34a;
+            border: 1px solid #bbf7d0;
         }
-
-        .btn-primary:hover {
-            background: var(--secondary-green);
-            transform: translateY(-1px);
+        
+        .alert-warning {
+            background: #fef3c7;
+            color: #d97706;
+            border: 1px solid #fde68a;
         }
-
-        .btn-secondary {
-            background: var(--gray-200);
-            color: var(--gray-700);
-        }
-
-        .btn-secondary:hover {
-            background: var(--gray-300);
-        }
-
-        .btn-danger {
-            background: var(--danger-red);
-            color: white;
-        }
-
-        .btn-danger:hover {
-            background: #b91c1c;
-        }
-
+        
+        /* Form Actions */
         .form-actions {
             display: flex;
-            gap: 1rem;
-            justify-content: flex-end;
-            margin-top: 1.5rem;
-            padding-top: 1.5rem;
+            justify-content: space-between;
+            align-items: center;
+            margin-top: 2rem;
+            padding-top: 2rem;
             border-top: 1px solid var(--gray-200);
         }
-
-        /* Breadcrumb */
-        .breadcrumb {
-            margin-bottom: 2rem;
-            font-size: var(--font-size-sm);
-            color: var(--gray-500);
+        
+        /* Password form specific */
+        .password-form {
+            max-width: 500px;
         }
-
-        .breadcrumb a {
-            color: var(--gray-500);
-            text-decoration: none;
+        
+        /* Info badges */
+        .info-badge {
+            display: inline-flex;
+            align-items: center;
+            gap: 0.25rem;
+            padding: 0.25rem 0.75rem;
+            background: var(--gray-100);
+            color: var(--gray-700);
+            border-radius: var(--radius-md);
+            font-size: 0.8125rem;
         }
-
-        .breadcrumb a:hover {
-            color: var(--primary-green);
+        
+        .info-badge.admin {
+            background: #fef3c7;
+            color: #d97706;
         }
-
-        /* Last Login Info */
-        .last-login-info {
-            background: var(--gray-50);
-            padding: 1rem;
-            border-radius: var(--radius-lg);
-            margin-bottom: 1.5rem;
-            font-size: var(--font-size-sm);
-            text-align: center;
-            color: var(--gray-600);
-        }
-
+        
         /* Responsive */
-        @media (max-width: 1024px) {
-            .edit-container {
-                grid-template-columns: 1fr;
-            }
-        }
-
         @media (max-width: 768px) {
-            .sidebar {
-                transform: translateX(-100%);
-                transition: transform 0.3s ease;
-            }
-
-            .sidebar.open {
-                transform: translateX(0);
-            }
-
-            .main-content {
-                margin-left: 0;
-            }
-
-            .sidebar-toggle {
-                display: block;
-            }
-
-            .form-row {
+            .form-grid {
                 grid-template-columns: 1fr;
             }
-
-            .orari-row {
+            
+            .checkbox-group {
                 grid-template-columns: 1fr;
             }
-
-            .content-container {
-                padding: 1rem;
+            
+            .tabs {
+                overflow-x: auto;
             }
-
-            .form-actions {
+            
+            .main-header {
                 flex-direction: column;
+                gap: 1rem;
+                align-items: flex-start;
             }
         }
     </style>
 </head>
 <body>
-    <div class="app-layout">
-        <!-- Sidebar Uniforme -->
-        <aside class="sidebar">
-            <nav class="nav">
-                <div class="nav-section">
-                    <div class="nav-item">
-                        <a href="/crm/dashboard.php" class="nav-link">
-                            <span class="nav-icon">🏠</span>
-                            <span>Dashboard</span>
-                        </a>
-                    </div>
-                    <div class="nav-item">
-                        <a href="/crm/modules/operatori/" class="nav-link active">
-                            <span class="nav-icon">👥</span>
-                            <span>Operatori</span>
-                            <?php if ($sessionInfo['is_admin']): ?>
-                                <span class="nav-badge">Admin</span>
-                            <?php endif; ?>
-                        </a>
-                    </div>
-                </div>
-                
-                <?php if ($sessionInfo['is_admin']): ?>
-                <div class="nav-section">
-                    <div class="nav-item">
-                        <a href="/crm/modules/clienti/" class="nav-link">
-                            <span class="nav-icon">🏢</span>
-                            <span>Clienti</span>
-                        </a>
-                    </div>
-                    <div class="nav-item">
-                        <a href="/crm/modules/reports/" class="nav-link">
-                            <span class="nav-icon">📈</span>
-                            <span>Reports</span>
-                        </a>
-                    </div>
-                    <div class="nav-item">
-                        <a href="/crm/modules/admin/" class="nav-link">
-                            <span class="nav-icon">⚙️</span>
-                            <span>Amministrazione</span>
-                        </a>
-                    </div>
-                </div>
-                <?php endif; ?>
-            </nav>
-        </aside>
-        
-        <!-- Main Content -->
-        <main class="main-content">
-            <!-- Header Uniforme -->
-            <header class="app-header">
-                <div class="header-left">
-                    <button class="sidebar-toggle" type="button">
-                        <span style="font-size: 1.25rem;">☰</span>
-                    </button>
-                    <h1 class="page-title">Modifica Operatore</h1>
-                </div>
-                
-                <div class="header-right">
-                    <!-- Timer Lavoro -->
-                    <div class="work-timer work-timer-display">
-                        <span class="timer-icon">⏱️</span>
-                        <span class="time-display">00:00:00</span>
-                    </div>
-                    
-                    <!-- User Menu -->
-                    <div class="user-menu">
-                        <div class="user-avatar" data-tooltip="<?= htmlspecialchars($sessionInfo['nome_completo']) ?>">
-                            <?= substr($sessionInfo['nome_completo'], 0, 1) ?>
-                        </div>
-                    </div>
-                </div>
-            </header>
-            
-            <!-- Content -->
-            <div class="content-container">
-                <!-- Breadcrumb -->
-                <div class="breadcrumb">
-                    <a href="/crm/dashboard.php">Dashboard</a>
-                    <span> > </span>
-                    <a href="/crm/modules/operatori/">Operatori</a>
-                    <span> > </span>
-                    <span style="color: var(--gray-800); font-weight: 500;">
-                        <?= htmlspecialchars($operatore['cognome'] . ' ' . $operatore['nome']) ?>
-                    </span>
-                </div>
-                
-                <!-- Info Badge -->
-                <?php if ($isSelfEdit): ?>
-                    <div class="info-badge">
-                        ℹ️ Stai modificando il tuo profilo personale
-                    </div>
-                <?php elseif ($isAdminEdit): ?>
-                    <div class="info-badge">
-                        🔧 Modifica amministratore - Accesso completo
-                    </div>
-                <?php endif; ?>
-                
-                <!-- Messaggi di errore/successo -->
-                <?php if (!empty($errors)): ?>
-                    <div class="alert alert-danger">
-                        <h4>❌ Errori di Validazione</h4>
-                        <ul>
-                            <?php foreach ($errors as $error): ?>
-                                <li><?= htmlspecialchars($error) ?></li>
-                            <?php endforeach; ?>
-                        </ul>
-                    </div>
-                <?php endif; ?>
-                
-                <?php if ($success): ?>
-                    <div class="alert alert-success">
-                        <h4>✅ Dati Aggiornati</h4>
-                        <p>Le modifiche sono state salvate con successo.</p>
-                    </div>
-                <?php endif; ?>
-                
-                <?php if ($passwordChanged): ?>
-                    <div class="alert alert-success">
-                        <h4>🔑 Password Aggiornata</h4>
-                        <p>La password è stata cambiata con successo.</p>
-                    </div>
-                <?php endif; ?>
-                
-                <div class="edit-container">
-                    <!-- Form Principale -->
-                    <div class="form-container">
-                        <div class="form-header">
-                            <h3>✏️ Modifica Dati</h3>
-                            <p><?= htmlspecialchars($operatore['cognome'] . ' ' . $operatore['nome']) ?></p>
-                        </div>
-                        
-                        <div class="form-content">
-                            <!-- **LOGICA ESISTENTE MANTENUTA** - Last Login Info -->
-                            <?php 
-                            $ultimoAccesso = $db->selectOne(
-                                "SELECT login_timestamp FROM sessioni_lavoro WHERE operatore_id = ? 
-                                 ORDER BY login_timestamp DESC LIMIT 1", 
-                                [$operatoreId]
-                            );
-                            ?>
-                            <?php if ($ultimoAccesso): ?>
-                                <div class="last-login-info">
-                                    📅 Ultimo accesso: <?= date('d/m/Y H:i', strtotime($ultimoAccesso['login_timestamp'])) ?>
-                                </div>
-                            <?php endif; ?>
-                            
-                            <!-- Form Dati -->
-                            <form method="POST">
-                                <input type="hidden" name="action" value="update">
-                                
-                                <!-- Dati Anagrafici -->
-                                <div class="form-row">
-                                    <div class="form-group">
-                                        <label class="form-label" for="cognome">Cognome *</label>
-                                        <input type="text" 
-                                               id="cognome" 
-                                               name="cognome" 
-                                               class="form-control" 
-                                               value="<?= htmlspecialchars($operatore['cognome']) ?>" 
-                                               required>
-                                    </div>
-                                    
-                                    <div class="form-group">
-                                        <label class="form-label" for="nome">Nome *</label>
-                                        <input type="text" 
-                                               id="nome" 
-                                               name="nome" 
-                                               class="form-control" 
-                                               value="<?= htmlspecialchars($operatore['nome']) ?>" 
-                                               required>
-                                    </div>
-                                </div>
-                                
-                                <div class="form-group">
-                                    <label class="form-label" for="email">Email *</label>
-                                    <input type="email" 
-                                           id="email" 
-                                           name="email" 
-                                           class="form-control" 
-                                           value="<?= htmlspecialchars($operatore['email']) ?>" 
-                                           required>
-                                </div>
-                                
-                                <!-- Qualifiche -->
-                                <div class="form-group">
-                                    <label class="form-label">Qualifiche Professionali</label>
-                                    <div class="qualifiche-grid">
-                                        <?php foreach ($qualificheDisponibili as $qualifica): ?>
-                                            <div class="checkbox-item">
-                                                <input type="checkbox" 
-                                                       id="qual_<?= md5($qualifica) ?>" 
-                                                       name="qualifiche[]" 
-                                                       value="<?= htmlspecialchars($qualifica) ?>"
-                                                       <?= in_array($qualifica, $qualificheEsistenti) ? 'checked' : '' ?>>
-                                                <label for="qual_<?= md5($qualifica) ?>"><?= htmlspecialchars($qualifica) ?></label>
-                                            </div>
-                                        <?php endforeach; ?>
-                                    </div>
-                                </div>
-                                
-                                <!-- Tipo Contratto -->
-                                <div class="form-group">
-                                    <label class="form-label" for="tipo_contratto">Tipo Contratto *</label>
-                                    <select id="tipo_contratto" name="tipo_contratto" class="form-control" required>
-                                        <option value="">Seleziona tipo contratto</option>
-                                        <option value="spezzato" <?= $operatore['tipo_contratto'] === 'spezzato' ? 'selected' : '' ?>>
-                                            Orario Spezzato (Mattino + Pomeriggio)
-                                        </option>
-                                        <option value="continuato" <?= $operatore['tipo_contratto'] === 'continuato' ? 'selected' : '' ?>>
-                                            Orario Continuato
-                                        </option>
-                                    </select>
-                                </div>
-                                
-                                <!-- Orari Spezzato -->
-                                <div id="orari-spezzato" class="orari-section">
-                                    <h4 style="margin-bottom: 1rem; color: var(--gray-700);">⏰ Orari Spezzato</h4>
-                                    
-                                    <div class="orari-row">
-                                        <div class="form-group">
-                                            <label class="form-label" for="orario_mattino_inizio">Mattino - Inizio</label>
-                                            <input type="time" 
-                                                   id="orario_mattino_inizio" 
-                                                   name="orario_mattino_inizio" 
-                                                   class="form-control"
-                                                   value="<?= htmlspecialchars($operatore['orario_mattino_inizio'] ?? '') ?>">
-                                        </div>
-                                        
-                                        <div class="form-group">
-                                            <label class="form-label" for="orario_mattino_fine">Mattino - Fine</label>
-                                            <input type="time" 
-                                                   id="orario_mattino_fine" 
-                                                   name="orario_mattino_fine" 
-                                                   class="form-control"
-                                                   value="<?= htmlspecialchars($operatore['orario_mattino_fine'] ?? '') ?>">
-                                        </div>
-                                    </div>
-                                    
-                                    <div class="orari-row">
-                                        <div class="form-group">
-                                            <label class="form-label" for="orario_pomeriggio_inizio">Pomeriggio - Inizio</label>
-                                            <input type="time" 
-                                                   id="orario_pomeriggio_inizio" 
-                                                   name="orario_pomeriggio_inizio" 
-                                                   class="form-control"
-                                                   value="<?= htmlspecialchars($operatore['orario_pomeriggio_inizio'] ?? '') ?>">
-                                        </div>
-                                        
-                                        <div class="form-group">
-                                            <label class="form-label" for="orario_pomeriggio_fine">Pomeriggio - Fine</label>
-                                            <input type="time" 
-                                                   id="orario_pomeriggio_fine" 
-                                                   name="orario_pomeriggio_fine" 
-                                                   class="form-control"
-                                                   value="<?= htmlspecialchars($operatore['orario_pomeriggio_fine'] ?? '') ?>">
-                                        </div>
-                                    </div>
-                                </div>
-                                
-                                <!-- Orari Continuato -->
-                                <div id="orari-continuato" class="orari-section">
-                                    <h4 style="margin-bottom: 1rem; color: var(--gray-700);">⏰ Orario Continuato</h4>
-                                    
-                                    <div class="orari-row">
-                                        <div class="form-group">
-                                            <label class="form-label" for="orario_continuato_inizio">Inizio</label>
-                                            <input type="time" 
-                                                   id="orario_continuato_inizio" 
-                                                   name="orario_continuato_inizio" 
-                                                   class="form-control"
-                                                   value="<?= htmlspecialchars($operatore['orario_continuato_inizio'] ?? '') ?>">
-                                        </div>
-                                        
-                                        <div class="form-group">
-                                            <label class="form-label" for="orario_continuato_fine">Fine</label>
-                                            <input type="time" 
-                                                   id="orario_continuato_fine" 
-                                                   name="orario_continuato_fine" 
-                                                   class="form-control"
-                                                   value="<?= htmlspecialchars($operatore['orario_continuato_fine'] ?? '') ?>">
-                                        </div>
-                                    </div>
-                                </div>
-                                
-                                <!-- Permessi Admin Only -->
-                                <?php if ($isAdminEdit): ?>
-                                <div class="form-row">
-                                    <div class="form-group">
-                                        <div class="checkbox-item">
-                                            <input type="checkbox" 
-                                                   id="is_amministratore" 
-                                                   name="is_amministratore" 
-                                                   value="1"
-                                                   <?= $operatore['is_amministratore'] ? 'checked' : '' ?>>
-                                            <label for="is_amministratore">🔧 Amministratore</label>
-                                        </div>
-                                    </div>
-                                    
-                                    <div class="form-group">
-                                        <div class="checkbox-item">
-                                            <input type="checkbox" 
-                                                   id="is_attivo" 
-                                                   name="is_attivo" 
-                                                   value="1" 
-                                                   <?= $operatore['is_attivo'] ? 'checked' : '' ?>>
-                                            <label for="is_attivo">✅ Operatore Attivo</label>
-                                        </div>
-                                    </div>
-                                </div>
-                                <?php endif; ?>
-                                
-                                <!-- Actions -->
-                                <div class="form-actions">
-                                    <a href="/crm/modules/operatori/" class="btn btn-secondary">
-                                        ← Annulla
-                                    </a>
-                                    <button type="submit" class="btn btn-primary">
-                                        💾 Salva Modifiche
-                                    </button>
-                                </div>
-                            </form>
-                        </div>
-                    </div>
+    <div class="edit-container">
+        <!-- Breadcrumb Navigation -->
+        <div class="breadcrumb">
+            <a href="/crm/?action=dashboard">Dashboard</a> / 
+            <a href="/crm/?action=operatori">Operatori</a> / 
+            <span>Modifica <?= htmlspecialchars($operatore['nome'] . ' ' . $operatore['cognome']) ?></span>
+        </div>
 
-                    <!-- Sidebar Change Password -->
-                    <div class="form-container">
-                        <div class="form-header">
-                            <h3>🔑 Cambia Password</h3>
-                            <p>Modifica la password di accesso</p>
-                        </div>
-                        
-                        <div class="form-content">
-                            <form method="POST">
-                                <input type="hidden" name="action" value="change_password">
-                                
-                                <!-- **LOGICA ESISTENTE MANTENUTA** - Password attuale solo per self-edit -->
-                                <?php if ($isSelfEdit): ?>
-                                <div class="form-group">
-                                    <label class="form-label" for="current_password">Password Attuale *</label>
-                                    <input type="password" 
-                                           id="current_password" 
-                                           name="current_password" 
-                                           class="form-control" 
-                                           required>
-                                </div>
-                                <?php endif; ?>
-                                
-                                <div class="form-group">
-                                    <label class="form-label" for="new_password">Nuova Password *</label>
-                                    <input type="password" 
-                                           id="new_password" 
-                                           name="new_password" 
-                                           class="form-control" 
-                                           minlength="8"
-                                           required>
-                                </div>
-                                
-                                <div class="form-group">
-                                    <label class="form-label" for="confirm_password">Conferma Password *</label>
-                                    <input type="password" 
-                                           id="confirm_password" 
-                                           name="confirm_password" 
-                                           class="form-control" 
-                                           minlength="8"
-                                           required>
-                                </div>
-                                
-                                <div class="form-actions">
-                                    <button type="submit" class="btn btn-danger">
-                                        🔑 Cambia Password
-                                    </button>
-                                </div>
-                            </form>
-                        </div>
-                    </div>
+        <!-- Header con info -->
+        <header class="main-header">
+            <div class="header-left">
+                <h1 class="page-title">✏️ Modifica Operatore</h1>
+                <div class="header-info">
+                    <?php if ($isSelfEdit): ?>
+                        <span class="info-badge">👤 Modifica profilo personale</span>
+                    <?php elseif ($isAdminEdit): ?>
+                        <span class="info-badge admin">👑 Modifica come amministratore</span>
+                    <?php endif; ?>
                 </div>
             </div>
-        </main>
+            <div class="header-actions">
+                <a href="/crm/?action=operatori&view=view&id=<?= $operatoreId ?>" class="btn btn-secondary">
+                    👁️ Visualizza
+                </a>
+                <a href="/crm/?action=operatori" class="btn btn-secondary">
+                    ← Torna alla Lista
+                </a>
+                <a href="/crm/?action=dashboard" class="btn btn-outline">
+                    🏠 Dashboard
+                </a>
+            </div>
+        </header>
+
+        <!-- Tabs per sezioni -->
+        <div class="tabs">
+            <button class="tab-button active" onclick="switchTab('general')">
+                📋 Dati Generali
+            </button>
+            <?php if ($isSelfEdit): ?>
+                <button class="tab-button" onclick="switchTab('password')">
+                    🔐 Cambio Password
+                </button>
+            <?php endif; ?>
+            <?php if ($isAdminEdit): ?>
+                <button class="tab-button" onclick="switchTab('permissions')">
+                    🔒 Permessi e Stato
+                </button>
+            <?php endif; ?>
+        </div>
+
+        <!-- Form Container -->
+        <div class="form-container">
+            <!-- Messaggi di errore/successo -->
+            <?php if (!empty($errors)): ?>
+                <div class="alert alert-error">
+                    <strong>⚠️ Errori nel form:</strong>
+                    <ul style="margin: 0.5rem 0 0 1.5rem;">
+                        <?php foreach ($errors as $error): ?>
+                            <li><?= htmlspecialchars($error) ?></li>
+                        <?php endforeach; ?>
+                    </ul>
+                </div>
+            <?php endif; ?>
+            
+            <?php if ($success && !$passwordChanged): ?>
+                <div class="alert alert-success">
+                    ✅ Dati operatore aggiornati con successo!
+                </div>
+            <?php endif; ?>
+            
+            <?php if ($passwordChanged): ?>
+                <div class="alert alert-success">
+                    🔐 Password modificata con successo!
+                </div>
+            <?php endif; ?>
+
+            <!-- Tab Dati Generali -->
+            <div id="general-tab" class="tab-content active">
+                <form method="POST" action="/crm/?action=operatori&view=edit&id=<?= $operatoreId ?>">
+                    <input type="hidden" name="action" value="update">
+                    
+                    <!-- Dati Anagrafici -->
+                    <div class="form-section">
+                        <h2 class="section-title">👤 Dati Anagrafici</h2>
+                        <div class="form-grid">
+                            <div class="form-group">
+                                <label class="form-label">
+                                    Cognome <span class="required">*</span>
+                                </label>
+                                <input type="text" 
+                                       name="cognome" 
+                                       class="form-control" 
+                                       value="<?= htmlspecialchars($operatore['cognome']) ?>" 
+                                       required>
+                            </div>
+                            
+                            <div class="form-group">
+                                <label class="form-label">
+                                    Nome <span class="required">*</span>
+                                </label>
+                                <input type="text" 
+                                       name="nome" 
+                                       class="form-control" 
+                                       value="<?= htmlspecialchars($operatore['nome']) ?>" 
+                                       required>
+                            </div>
+                            
+                            <div class="form-group">
+                                <label class="form-label">
+                                    Email <span class="required">*</span>
+                                </label>
+                                <input type="email" 
+                                       name="email" 
+                                       class="form-control" 
+                                       value="<?= htmlspecialchars($operatore['email']) ?>" 
+                                       required>
+                                <div class="form-hint">
+                                    Utilizzata per l'accesso al sistema
+                                </div>
+                            </div>
+                            
+                            <div class="form-group">
+                                <label class="form-label">Telefono</label>
+                                <input type="tel" 
+                                       name="telefono" 
+                                       class="form-control" 
+                                       value="<?= htmlspecialchars($operatore['telefono'] ?? '') ?>"
+                                       placeholder="+39 123 456 7890">
+                            </div>
+                            
+                            <div class="form-group">
+                                <label class="form-label">Codice Operatore</label>
+                                <input type="text" 
+                                       class="form-control" 
+                                       value="<?= htmlspecialchars($operatore['codice_operatore']) ?>" 
+                                       disabled>
+                                <div class="form-hint">
+                                    Non modificabile
+                                </div>
+                            </div>
+                            
+                            <div class="form-group">
+                                <label class="form-label">Data Registrazione</label>
+                                <input type="text" 
+                                       class="form-control" 
+                                       value="<?= date('d/m/Y H:i', strtotime($operatore['created_at'])) ?>" 
+                                       disabled>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Qualifiche e Competenze -->
+                    <div class="form-section">
+                        <h2 class="section-title">🎯 Qualifiche e Competenze</h2>
+                        <div class="form-group">
+                            <label class="form-label">Seleziona le qualifiche dell'operatore</label>
+                            <div class="checkbox-group">
+                                <?php foreach ($qualificheDisponibili as $qualifica): ?>
+                                    <div class="checkbox-item">
+                                        <input type="checkbox" 
+                                               id="qual_<?= md5($qualifica) ?>" 
+                                               name="qualifiche[]" 
+                                               value="<?= htmlspecialchars($qualifica) ?>"
+                                               <?= in_array($qualifica, $qualificheEsistenti) ? 'checked' : '' ?>>
+                                        <label for="qual_<?= md5($qualifica) ?>">
+                                            <?= htmlspecialchars($qualifica) ?>
+                                        </label>
+                                    </div>
+                                <?php endforeach; ?>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Informazioni Contrattuali -->
+                    <div class="form-section">
+                        <h2 class="section-title">📋 Informazioni Contrattuali</h2>
+                        <div class="form-grid">
+                            <div class="form-group">
+                                <label class="form-label">Tipo Contratto</label>
+                                <select name="tipo_contratto" class="form-control">
+                                    <option value="">-- Seleziona --</option>
+                                    <option value="indeterminato" <?= $operatore['tipo_contratto'] === 'indeterminato' ? 'selected' : '' ?>>
+                                        Tempo Indeterminato
+                                    </option>
+                                    <option value="determinato" <?= $operatore['tipo_contratto'] === 'determinato' ? 'selected' : '' ?>>
+                                        Tempo Determinato
+                                    </option>
+                                    <option value="partita_iva" <?= $operatore['tipo_contratto'] === 'partita_iva' ? 'selected' : '' ?>>
+                                        Partita IVA
+                                    </option>
+                                    <option value="apprendistato" <?= $operatore['tipo_contratto'] === 'apprendistato' ? 'selected' : '' ?>>
+                                        Apprendistato
+                                    </option>
+                                    <option value="stage" <?= $operatore['tipo_contratto'] === 'stage' ? 'selected' : '' ?>>
+                                        Stage/Tirocinio
+                                    </option>
+                                </select>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Orari di Lavoro -->
+                    <div class="form-section">
+                        <h2 class="section-title">🕐 Orari di Lavoro</h2>
+                        <div class="form-grid">
+                            <div class="form-group">
+                                <label class="form-label">Orario Mattino</label>
+                                <div class="time-inputs">
+                                    <input type="time" 
+                                           name="orario_mattino_inizio" 
+                                           class="form-control" 
+                                           value="<?= htmlspecialchars($operatore['orario_mattino_inizio'] ?? '') ?>">
+                                    <span class="time-separator">-</span>
+                                    <input type="time" 
+                                           name="orario_mattino_fine" 
+                                           class="form-control" 
+                                           value="<?= htmlspecialchars($operatore['orario_mattino_fine'] ?? '') ?>">
+                                </div>
+                            </div>
+                            
+                            <div class="form-group">
+                                <label class="form-label">Orario Pomeriggio</label>
+                                <div class="time-inputs">
+                                    <input type="time" 
+                                           name="orario_pomeriggio_inizio" 
+                                           class="form-control" 
+                                           value="<?= htmlspecialchars($operatore['orario_pomeriggio_inizio'] ?? '') ?>">
+                                    <span class="time-separator">-</span>
+                                    <input type="time" 
+                                           name="orario_pomeriggio_fine" 
+                                           class="form-control" 
+                                           value="<?= htmlspecialchars($operatore['orario_pomeriggio_fine'] ?? '') ?>">
+                                </div>
+                            </div>
+                            
+                            <div class="form-group" style="grid-column: span 2;">
+                                <label class="form-label">Orario Continuato (se applicabile)</label>
+                                <div class="time-inputs" style="max-width: 300px;">
+                                    <input type="time" 
+                                           name="orario_continuato_inizio" 
+                                           class="form-control" 
+                                           value="<?= htmlspecialchars($operatore['orario_continuato_inizio'] ?? '') ?>">
+                                    <span class="time-separator">-</span>
+                                    <input type="time" 
+                                           name="orario_continuato_fine" 
+                                           class="form-control" 
+                                           value="<?= htmlspecialchars($operatore['orario_continuato_fine'] ?? '') ?>">
+                                </div>
+                                <div class="form-hint">
+                                    Compilare solo se l'operatore ha orario continuato invece di mattino/pomeriggio
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <?php if ($isAdminEdit): ?>
+                    <!-- Permessi e Stato (solo admin) -->
+                    <div class="form-section">
+                        <h2 class="section-title">🔐 Permessi e Stato</h2>
+                        <div class="form-grid">
+                            <div class="form-group">
+                                <div class="switch-group">
+                                    <label class="switch">
+                                        <input type="checkbox" 
+                                               name="is_amministratore" 
+                                               <?= $operatore['is_amministratore'] ? 'checked' : '' ?>>
+                                        <span class="slider"></span>
+                                    </label>
+                                    <label class="form-label" style="margin-bottom: 0;">
+                                        Amministratore di Sistema
+                                    </label>
+                                </div>
+                                <div class="form-hint">
+                                    Gli amministratori possono gestire altri operatori e accedere a tutte le funzionalità
+                                </div>
+                            </div>
+                            
+                            <div class="form-group">
+                                <div class="switch-group">
+                                    <label class="switch">
+                                        <input type="checkbox" 
+                                               name="is_attivo" 
+                                               <?= $operatore['is_attivo'] ? 'checked' : '' ?>>
+                                        <span class="slider"></span>
+                                    </label>
+                                    <label class="form-label" style="margin-bottom: 0;">
+                                        Account Attivo
+                                    </label>
+                                </div>
+                                <div class="form-hint">
+                                    Disattivare per impedire l'accesso al sistema
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                    <?php endif; ?>
+
+                    <!-- Azioni Form -->
+                    <div class="form-actions">
+                        <div>
+                            <button type="submit" class="btn btn-primary">
+                                💾 Salva Modifiche
+                            </button>
+                            <button type="reset" class="btn btn-secondary">
+                                🔄 Ripristina
+                            </button>
+                        </div>
+                        <div>
+                            <a href="/crm/?action=operatori&view=view&id=<?= $operatoreId ?>" class="btn btn-outline">
+                                ❌ Annulla
+                            </a>
+                        </div>
+                    </div>
+                </form>
+            </div>
+
+            <?php if ($isSelfEdit): ?>
+            <!-- Tab Cambio Password -->
+            <div id="password-tab" class="tab-content">
+                <form method="POST" action="/crm/?action=operatori&view=edit&id=<?= $operatoreId ?>" class="password-form">
+                    <input type="hidden" name="action" value="change_password">
+                    
+                    <div class="form-section">
+                        <h2 class="section-title">🔐 Cambio Password</h2>
+                        
+                        <?php if (!$isSelfEdit): ?>
+                            <div class="alert alert-warning">
+                                ⚠️ Solo l'utente può modificare la propria password
+                            </div>
+                        <?php else: ?>
+                            <div class="form-group">
+                                <label class="form-label">
+                                    Password Attuale <span class="required">*</span>
+                                </label>
+                                <input type="password" 
+                                       name="current_password" 
+                                       class="form-control" 
+                                       required>
+                            </div>
+                            
+                            <div class="form-group">
+                                <label class="form-label">
+                                    Nuova Password <span class="required">*</span>
+                                </label>
+                                <input type="password" 
+                                       name="new_password" 
+                                       class="form-control" 
+                                       required
+                                       minlength="8">
+                                <div class="form-hint">
+                                    Minimo 8 caratteri
+                                </div>
+                            </div>
+                            
+                            <div class="form-group">
+                                <label class="form-label">
+                                    Conferma Nuova Password <span class="required">*</span>
+                                </label>
+                                <input type="password" 
+                                       name="confirm_password" 
+                                       class="form-control" 
+                                       required
+                                       minlength="8">
+                            </div>
+                            
+                            <div class="form-actions">
+                                <button type="submit" class="btn btn-primary">
+                                    🔒 Cambia Password
+                                </button>
+                            </div>
+                        <?php endif; ?>
+                    </div>
+                </form>
+            </div>
+            <?php endif; ?>
+        </div>
     </div>
 
-    <!-- JavaScript -->
-    <script src="/crm/assets/js/microinteractions.js"></script>
     <script>
-        // **LOGICA ESISTENTE MANTENUTA** - Gestione orari dinamici
-        document.getElementById('tipo_contratto').addEventListener('change', function() {
-            const spezzato = document.getElementById('orari-spezzato');
-            const continuato = document.getElementById('orari-continuato');
+        // Switch tabs
+        function switchTab(tabName) {
+            // Rimuovi active da tutti i tab
+            document.querySelectorAll('.tab-button').forEach(btn => {
+                btn.classList.remove('active');
+            });
+            document.querySelectorAll('.tab-content').forEach(content => {
+                content.classList.remove('active');
+            });
             
-            spezzato.classList.remove('active');
-            continuato.classList.remove('active');
-            
-            if (this.value === 'spezzato') {
-                spezzato.classList.add('active');
-            } else if (this.value === 'continuato') {
-                continuato.classList.add('active');
-            }
-        });
-
-        // Attiva sezione orari se già selezionata
-        const tipoContratto = document.getElementById('tipo_contratto').value;
-        if (tipoContratto) {
-            document.getElementById('tipo_contratto').dispatchEvent(new Event('change'));
+            // Attiva il tab selezionato
+            event.target.classList.add('active');
+            document.getElementById(tabName + '-tab').classList.add('active');
         }
-
-        // Validazione password match
-        const newPassword = document.getElementById('new_password');
-        const confirmPassword = document.getElementById('confirm_password');
         
-        function validatePassword() {
-            if (newPassword.value !== confirmPassword.value) {
-                confirmPassword.setCustomValidity('Le password non coincidono');
-            } else {
-                confirmPassword.setCustomValidity('');
-            }
+        // Validazione password match
+        const newPassword = document.querySelector('input[name="new_password"]');
+        const confirmPassword = document.querySelector('input[name="confirm_password"]');
+        
+        if (newPassword && confirmPassword) {
+            confirmPassword.addEventListener('input', () => {
+                if (newPassword.value !== confirmPassword.value) {
+                    confirmPassword.setCustomValidity('Le password non coincidono');
+                } else {
+                    confirmPassword.setCustomValidity('');
+                }
+            });
         }
-
-        newPassword.addEventListener('input', validatePassword);
-        confirmPassword.addEventListener('input', validatePassword);
-
-        // Timer lavoro - logica esistente
-        let timerInterval;
-        let startTime = localStorage.getItem('workStartTime');
-        let isPaused = localStorage.getItem('workPaused') === 'true';
-
-        function updateTimer() {
-            if (!startTime || isPaused) return;
-            
-            const now = new Date().getTime();
-            const elapsed = now - parseInt(startTime);
-            const hours = Math.floor(elapsed / (1000 * 60 * 60));
-            const minutes = Math.floor((elapsed % (1000 * 60 * 60)) / (1000 * 60));
-            const seconds = Math.floor((elapsed % (1000 * 60)) / 1000);
-            
-            const display = `${hours.toString().padStart(2, '0')}:${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}`;
-            document.querySelector('.time-display').textContent = display;
-        }
-
-        if (startTime && !isPaused) {
-            timerInterval = setInterval(updateTimer, 1000);
-            updateTimer();
-        }
-
-        // Toggle sidebar mobile
-        document.querySelector('.sidebar-toggle')?.addEventListener('click', function() {
-            document.querySelector('.sidebar').classList.toggle('open');
-        });
     </script>
 </body>
 </html>
