@@ -1,6 +1,6 @@
 <?php
 /**
- * modules/clienti/index.php - Lista Clienti CRM Re.De Consulting
+ * modules/clienti/index_list.php - Lista Clienti CRM Re.De Consulting
  * 
  * ✅ LAYOUT ULTRA-DENSO CONFORME AL DESIGN SYSTEM DATEV v2.0
  * 
@@ -93,10 +93,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
             default:
                 echo json_encode(['success' => false, 'message' => 'Azione non valida']);
         }
+        exit;
     } catch (Exception $e) {
         echo json_encode(['success' => false, 'message' => $e->getMessage()]);
+        exit;
     }
-    exit;
 }
 
 // Gestione filtri
@@ -144,14 +145,14 @@ try {
             o.email as operatore_email,
             o.is_attivo as operatore_attivo,
             
-            -- Conteggio pratiche associate
-            (SELECT COUNT(*) FROM pratiche p WHERE p.cliente_id = c.id) as totale_pratiche,
-            (SELECT COUNT(*) FROM pratiche p WHERE p.cliente_id = c.id AND p.stato IN ('da_iniziare', 'in_corso')) as pratiche_attive,
+            -- Conteggio pratiche associate (placeholder)
+            0 as totale_pratiche,
+            0 as pratiche_attive,
             
-            -- Ultima comunicazione (se tabella note_clienti esiste)
-            (SELECT MAX(data_nota) FROM note_clienti nc WHERE nc.cliente_id = c.id) as ultima_comunicazione,
+            -- Ultima comunicazione (se tabella esiste)
+            NULL as ultima_comunicazione,
             
-            -- Prossima scadenza (calcolata da adempimenti se implementati)
+            -- Prossima scadenza (placeholder)
             NULL as prossima_scadenza
             
         FROM clienti c
@@ -474,6 +475,27 @@ function getTipologiaIcon($tipologia) {
             background: var(--secondary-green);
         }
         
+        .btn-secondary-compact {
+            height: 32px;
+            padding: 0.25rem 0.75rem;
+            background: var(--gray-200);
+            color: var(--gray-700);
+            border: none;
+            border-radius: var(--radius-md);
+            font-size: 0.875rem;
+            font-weight: 500;
+            cursor: pointer;
+            transition: all var(--transition-fast);
+            text-decoration: none;
+            display: inline-flex;
+            align-items: center;
+            gap: 0.25rem;
+        }
+        
+        .btn-secondary-compact:hover {
+            background: var(--gray-300);
+        }
+        
         /* Responsive per mobile */
         @media (max-width: 768px) {
             .table-header,
@@ -542,11 +564,11 @@ function getTipologiaIcon($tipologia) {
             
             <div class="header-actions">
                 <?php if ($isAdmin): ?>
-                <a href="/crm/modules/clienti/stats.php" class="btn-secondary-compact">
+                <a href="/crm/?action=clienti&view=stats" class="btn-secondary-compact">
                     📊 Statistiche
                 </a>
                 <?php endif; ?>
-                <a href="/crm/modules/clienti/create.php" class="btn-primary-compact">
+                <a href="/crm/?action=clienti&view=create" class="btn-primary-compact">
                     ➕ Nuovo Cliente
                 </a>
             </div>
@@ -582,7 +604,8 @@ function getTipologiaIcon($tipologia) {
 
         <!-- Filtri Compatti -->
         <div class="filters-section">
-            <form method="GET" class="filters-grid">
+            <form method="GET" class="filters-grid" action="/crm/">
+                <input type="hidden" name="action" value="clienti">
                 <input type="text" name="search" value="<?= htmlspecialchars($search) ?>" 
                        placeholder="🔍 Cerca per nome, CF, P.IVA..." class="form-input-compact">
                 
@@ -612,7 +635,7 @@ function getTipologiaIcon($tipologia) {
                 </select>
                 
                 <button type="submit" class="btn-primary-compact">Filtra</button>
-                <a href="/crm/modules/clienti/index.php" class="btn-secondary-compact">Reset</a>
+                <a href="/crm/?action=clienti" class="btn-secondary-compact">Reset</a>
             </form>
         </div>
 
@@ -633,7 +656,7 @@ function getTipologiaIcon($tipologia) {
             <?php if (empty($clienti)): ?>
                 <div style="padding: 2rem; text-align: center; color: var(--gray-500);">
                     <p>🔍 Nessun cliente trovato con i filtri attuali</p>
-                    <a href="/crm/modules/clienti/create.php" class="btn-primary-compact" style="margin-top: 1rem;">
+                    <a href="/crm/?action=clienti&view=create" class="btn-primary-compact" style="margin-top: 1rem;">
                         ➕ Aggiungi il primo cliente
                     </a>
                 </div>
@@ -732,11 +755,11 @@ function getTipologiaIcon($tipologia) {
     <script>
         // Funzioni specifiche clienti
         function viewCliente(id) {
-            window.location.href = `/crm/modules/clienti/view.php?id=${id}`;
+            window.location.href = `/crm/?action=clienti&view=view&id=${id}`;
         }
 
         function editCliente(id) {
-            window.location.href = `/crm/modules/clienti/edit.php?id=${id}`;
+            window.location.href = `/crm/?action=clienti&view=edit&id=${id}`;
         }
 
         function toggleStatus(id, currentStatus) {
@@ -746,7 +769,7 @@ function getTipologiaIcon($tipologia) {
                 return;
             }
 
-            fetch('/crm/modules/clienti/index.php', {
+            fetch('/crm/?action=clienti', {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/x-www-form-urlencoded',

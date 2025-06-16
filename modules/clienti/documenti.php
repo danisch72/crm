@@ -2,7 +2,7 @@
 /**
  * modules/clienti/documenti.php - Gestione Documenti Cliente CRM Re.De Consulting
  * 
- * ✅ DOCUMENT MANAGEMENT PROFESSIONALE COMMERCIALISTI
+ * ✅ DOCUMENT MANAGEMENT PROFESSIONALE COMMERCIALISTI - VERSIONE CORRETTA
  * 
  * Features:
  * - Upload multiplo con drag & drop
@@ -16,31 +16,17 @@
  * - Protezione anti-virus integrata
  */
 
-// Avvia sessione se non già attiva
-if (session_status() === PHP_SESSION_NONE) {
-    session_start();
-}
-
-// Percorsi assoluti robusti
-require_once $_SERVER['DOCUMENT_ROOT'] . '/crm/core/classes/Database.php';
-require_once $_SERVER['DOCUMENT_ROOT'] . '/crm/core/auth/AuthSystem.php';
-require_once $_SERVER['DOCUMENT_ROOT'] . '/crm/core/functions/helpers.php';
-
-// Verifica autenticazione
-if (!AuthSystem::isAuthenticated()) {
-    header('Location: /crm/core/auth/login.php');
+// Verifica che siamo passati dal router
+if (!defined('CLIENTI_ROUTER_LOADED')) {
+    header('Location: /crm/?action=clienti');
     exit;
 }
 
-$sessionInfo = AuthSystem::getSessionInfo();
-$db = Database::getInstance();
+// Variabili già disponibili dal router:
+// $sessionInfo, $db, $error_message, $success_message
+// $clienteId (validato dal router)
 
-// Verifica ID cliente
-$clienteId = (int)($_GET['id'] ?? 0);
-if (!$clienteId) {
-    header('Location: /crm/modules/clienti/index.php');
-    exit;
-}
+$pageTitle = 'Documenti Cliente';
 
 // Configurazione upload
 $uploadDir = $_SERVER['DOCUMENT_ROOT'] . '/crm/uploads/clienti/' . $clienteId . '/';
@@ -68,12 +54,14 @@ try {
     ", [$clienteId]);
     
     if (!$cliente) {
-        header('Location: /crm/modules/clienti/index.php?error=not_found');
+        $_SESSION['error_message'] = '⚠️ Cliente non trovato';
+        header('Location: /crm/?action=clienti');
         exit;
     }
 } catch (Exception $e) {
     error_log("Errore caricamento cliente $clienteId: " . $e->getMessage());
-    header('Location: /crm/modules/clienti/index.php?error=db_error');
+    $_SESSION['error_message'] = '⚠️ Errore database';
+    header('Location: /crm/?action=clienti');
     exit;
 }
 
@@ -84,58 +72,47 @@ $success = '';
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $action = $_POST['action'] ?? '';
     
-    try {
-        switch ($action) {
-            case 'upload':
-                $uploadResult = handleFileUpload();
-                if ($uploadResult['success']) {
-                    $success = $uploadResult['message'];
-                } else {
-                    $errors[] = $uploadResult['message'];
+    switch ($action) {
+        case 'upload':
+            $result = handleFileUpload();
+            if ($result['success']) {
+                $success = $result['message'];
+            } else {
+                $errors[] = $result['message'];
+            }
+            break;
+            
+        case 'delete':
+            $documentoId = (int)($_POST['documento_id'] ?? 0);
+            if ($documentoId && $sessionInfo['is_admin']) {
+                try {
+                    // Recupera info file
+                    $doc = $db->selectOne("
+                        SELECT nome_file_salvato 
+                        FROM documenti_clienti 
+                        WHERE id = ? AND cliente_id = ?
+                    ", [$documentoId, $clienteId]);
+                    
+                    if ($doc) {
+                        // Elimina file fisico
+                        $filePath = $uploadDir . $doc['nome_file_salvato'];
+                        if (file_exists($filePath)) {
+                            unlink($filePath);
+                        }
+                        
+                        // Elimina record DB
+                        $db->delete('documenti_clienti', 'id = ?', [$documentoId]);
+                        $success = '✅ Documento eliminato con successo';
+                    }
+                } catch (Exception $e) {
+                    $errors[] = 'Errore eliminazione documento';
                 }
-                break;
-                
-            case 'delete':
-                $documentoId = (int)$_POST['documento_id'];
-                $deleteResult = deleteDocument($documentoId);
-                if ($deleteResult['success']) {
-                    $success = $deleteResult['message'];
-                } else {
-                    $errors[] = $deleteResult['message'];
-                }
-                break;
-                
-            case 'update_category':
-                $documentoId = (int)$_POST['documento_id'];
-                $categoria = $_POST['categoria'];
-                $descrizione = $_POST['descrizione'] ?? '';
-                
-                $updated = $db->update('documenti_clienti', [
-                    'categoria' => $categoria,
-                    'descrizione' => $descrizione
-                ], 'id = ? AND cliente_id = ?', [$documentoId, $clienteId]);
-                
-                if ($updated) {
-                    $success = 'Documento aggiornato con successo';
-                } else {
-                    $errors[] = 'Errore durante l\'aggiornamento';
-                }
-                break;
-        }
-    } catch (Exception $e) {
-        error_log("Errore gestione documenti: " . $e->getMessage());
-        $errors[] = 'Errore interno durante l\'operazione';
+            }
+            break;
     }
 }
 
-// Gestione download
-if (isset($_GET['download'])) {
-    $documentoId = (int)$_GET['download'];
-    downloadDocument($documentoId);
-    exit;
-}
-
-// Carica documenti esistenti
+// Carica lista documenti
 try {
     $documenti = $db->select("
         SELECT 
@@ -203,199 +180,80 @@ function handleFileUpload() {
         
         // Sposta file
         if (move_uploaded_file($fileTmpName, $fullPath)) {
-            // Calcola hash per controllo integrità
-            $fileHash = hash_file('sha256', $fullPath);
-            
-            // Auto-categorizzazione
-            $categoria = autoDetectCategory($fileName, $fileType);
-            
-            // Salva in database
+            // Salva in DB
             try {
                 $db->insert('documenti_clienti', [
                     'cliente_id' => $clienteId,
-                    'operatore_id' => $sessionInfo['user_id'],
-                    'nome_file' => $safeFileName,
-                    'nome_originale' => $fileName,
-                    'path_file' => $fullPath,
-                    'dimensione_file' => $fileSize,
+                    'operatore_id' => $sessionInfo['operatore_id'],
+                    'categoria' => $_POST['categoria'] ?? 'generale',
+                    'nome_file_originale' => $fileName,
+                    'nome_file_salvato' => $safeFileName,
+                    'dimensione' => $fileSize,
                     'tipo_mime' => $fileType,
-                    'hash_file' => $fileHash,
-                    'categoria' => $categoria,
-                    'data_upload' => date('Y-m-d H:i:s')
+                    'note' => $_POST['note'] ?? null
                 ]);
-                
                 $uploadedCount++;
-                
             } catch (Exception $e) {
-                // Rimuovi file se errore database
+                $errors[] = "Errore salvataggio DB per: $fileName";
+                // Rimuovi file se fallisce DB
                 unlink($fullPath);
-                $errors[] = "Errore database per file: $fileName";
             }
         } else {
-            $errors[] = "Impossibile salvare file: $fileName";
+            $errors[] = "Impossibile salvare: $fileName";
         }
     }
     
     if ($uploadedCount > 0) {
-        $message = "Caricati $uploadedCount file con successo";
+        $message = "✅ Caricati $uploadedCount file con successo";
         if (!empty($errors)) {
-            $message .= ". Errori: " . implode(', ', $errors);
+            $message .= " (alcuni file hanno avuto problemi)";
         }
         return ['success' => true, 'message' => $message];
     } else {
-        return ['success' => false, 'message' => 'Nessun file caricato. Errori: ' . implode(', ', $errors)];
+        return ['success' => false, 'message' => implode('<br>', $errors)];
     }
 }
 
 function generateSafeFileName($originalName) {
-    $pathInfo = pathinfo($originalName);
-    $baseName = preg_replace('/[^a-zA-Z0-9_-]/', '_', $pathInfo['filename']);
-    $extension = strtolower($pathInfo['extension']);
-    $timestamp = time();
+    $info = pathinfo($originalName);
+    $ext = strtolower($info['extension']);
+    $name = preg_replace('/[^A-Za-z0-9\-]/', '_', $info['filename']);
+    $timestamp = date('YmdHis');
+    $random = substr(md5(uniqid()), 0, 6);
     
-    return $baseName . '_' . $timestamp . '.' . $extension;
+    return "{$name}_{$timestamp}_{$random}.{$ext}";
 }
 
-function autoDetectCategory($fileName, $mimeType) {
-    $fileName = strtolower($fileName);
-    
-    // Pattern per auto-categorizzazione
-    $patterns = [
-        'contratto' => ['contratto', 'accordo', 'convenzione'],
-        'documento_identita' => ['carta_identita', 'passaporto', 'patente', 'codice_fiscale'],
-        'certificato' => ['certificato', 'visura', 'camerale'],
-        'fattura' => ['fattura', 'ricevuta', 'scontrino'],
-        'bilancio' => ['bilancio', 'conto_economico', 'stato_patrimoniale'],
-        'dichiarazione' => ['dichiarazione', 'modello', 'unico', '730']
-    ];
-    
-    foreach ($patterns as $categoria => $keywords) {
-        foreach ($keywords as $keyword) {
-            if (strpos($fileName, $keyword) !== false) {
-                return $categoria;
-            }
-        }
-    }
-    
-    // Categorizzazione per MIME type
-    if (strpos($mimeType, 'image/') === 0) {
-        return 'documento_identita';
-    }
-    
-    return 'altro';
-}
-
-function deleteDocument($documentoId) {
-    global $db, $clienteId, $sessionInfo;
-    
-    try {
-        // Verifica esistenza e permessi
-        $documento = $db->selectOne("
-            SELECT * FROM documenti_clienti 
-            WHERE id = ? AND cliente_id = ?
-        ", [$documentoId, $clienteId]);
-        
-        if (!$documento) {
-            return ['success' => false, 'message' => 'Documento non trovato'];
-        }
-        
-        // Verifica permessi (solo admin o chi ha caricato)
-        if (!$sessionInfo['is_admin'] && $documento['operatore_id'] != $sessionInfo['user_id']) {
-            return ['success' => false, 'message' => 'Permessi insufficienti'];
-        }
-        
-        // Elimina file fisico
-        if (file_exists($documento['path_file'])) {
-            unlink($documento['path_file']);
-        }
-        
-        // Elimina record database
-        $deleted = $db->delete('documenti_clienti', 'id = ?', [$documentoId]);
-        
-        if ($deleted) {
-            return ['success' => true, 'message' => 'Documento eliminato con successo'];
-        } else {
-            return ['success' => false, 'message' => 'Errore durante l\'eliminazione'];
-        }
-        
-    } catch (Exception $e) {
-        error_log("Errore eliminazione documento: " . $e->getMessage());
-        return ['success' => false, 'message' => 'Errore interno'];
-    }
-}
-
-function downloadDocument($documentoId) {
-    global $db, $clienteId, $sessionInfo;
-    
-    try {
-        $documento = $db->selectOne("
-            SELECT * FROM documenti_clienti 
-            WHERE id = ? AND cliente_id = ?
-        ", [$documentoId, $clienteId]);
-        
-        if (!$documento) {
-            http_response_code(404);
-            die('Documento non trovato');
-        }
-        
-        if (!file_exists($documento['path_file'])) {
-            http_response_code(404);
-            die('File fisico non trovato');
-        }
-        
-        // Aggiorna contatore accessi
-        $db->update('documenti_clienti', [
-            'ultimo_accesso' => date('Y-m-d H:i:s'),
-            'numero_accessi' => $documento['numero_accessi'] + 1
-        ], 'id = ?', [$documentoId]);
-        
-        // Headers per download
-        header('Content-Type: ' . $documento['tipo_mime']);
-        header('Content-Disposition: attachment; filename="' . $documento['nome_originale'] . '"');
-        header('Content-Length: ' . $documento['dimensione_file']);
-        header('Cache-Control: no-cache, must-revalidate');
-        header('Expires: 0');
-        
-        // Output file
-        readfile($documento['path_file']);
-        
-    } catch (Exception $e) {
-        error_log("Errore download documento: " . $e->getMessage());
-        http_response_code(500);
-        die('Errore interno');
-    }
-}
-
-// Funzioni helper
 function formatFileSize($bytes) {
-    $units = ['B', 'KB', 'MB', 'GB'];
-    $bytes = max($bytes, 0);
-    $pow = floor(($bytes ? log($bytes) : 0) / log(1024));
-    $pow = min($pow, count($units) - 1);
-    
-    $bytes /= pow(1024, $pow);
-    
-    return round($bytes, 1) . ' ' . $units[$pow];
+    if ($bytes < 1024) return $bytes . ' B';
+    if ($bytes < 1048576) return round($bytes / 1024, 1) . ' KB';
+    return round($bytes / 1048576, 1) . ' MB';
 }
 
-function getCategoryIcon($categoria) {
+function getCategoriaIcon($categoria) {
     $icons = [
-        'contratto' => '📋',
-        'documento_identita' => '🆔',
-        'certificato' => '📜',
+        'contratto' => '📄',
         'fattura' => '🧾',
-        'bilancio' => '📊',
-        'dichiarazione' => '📑',
+        'documento_identita' => '🪪',
         'visura' => '🏢',
-        'altro' => '📄'
+        'bilancio' => '📊',
+        'dichiarazione' => '📋',
+        'generale' => '📎'
     ];
-    
-    return $icons[$categoria] ?? '📄';
+    return $icons[$categoria] ?? '📎';
 }
 
-function canPreview($mimeType) {
-    $previewTypes = ['application/pdf', 'image/jpeg', 'image/png', 'image/gif', 'text/plain'];
-    return in_array($mimeType, $previewTypes);
+function getCategoriaNome($categoria) {
+    $nomi = [
+        'contratto' => 'Contratti',
+        'fattura' => 'Fatture',
+        'documento_identita' => 'Documenti Identità',
+        'visura' => 'Visure',
+        'bilancio' => 'Bilanci',
+        'dichiarazione' => 'Dichiarazioni',
+        'generale' => 'Generale'
+    ];
+    return $nomi[$categoria] ?? 'Altro';
 }
 ?>
 
@@ -404,531 +262,343 @@ function canPreview($mimeType) {
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>📁 Documenti <?= htmlspecialchars($cliente['ragione_sociale']) ?> - CRM Re.De Consulting</title>
+    <title><?= $pageTitle ?> - <?= htmlspecialchars($cliente['ragione_sociale']) ?> - CRM Re.De</title>
     
-    <!-- Design System Datev Ultra-Denso -->
-    <link rel="stylesheet" href="/crm/assets/css/datev-style.css">
-    <link rel="stylesheet" href="/crm/assets/css/responsive.css">
+    <!-- Design System CSS -->
+    <link rel="stylesheet" href="/crm/assets/css/design-system.css">
+    <link rel="stylesheet" href="/crm/assets/css/clienti.css">
     
     <style>
-        /* Document Management Layout */
-        .docs-container {
+        /* Layout denso documenti */
+        .documenti-container {
             max-width: 1200px;
             margin: 0 auto;
             padding: 1rem;
         }
         
-        .docs-header {
-            background: linear-gradient(135deg, var(--primary-green), var(--secondary-green));
-            color: white;
-            padding: 1.5rem;
-            border-radius: var(--radius-lg);
-            margin-bottom: 1.5rem;
-            display: flex;
-            align-items: center;
-            justify-content: space-between;
-            flex-wrap: wrap;
-            gap: 1rem;
-        }
-        
-        .docs-title {
-            font-size: 1.25rem;
-            font-weight: 600;
-            display: flex;
-            align-items: center;
-            gap: 0.75rem;
-        }
-        
-        .docs-actions {
-            display: flex;
-            gap: 0.75rem;
-        }
-        
-        .btn {
-            height: 36px;
-            padding: 0.5rem 1rem;
-            border: none;
-            border-radius: var(--radius-md);
-            font-size: 0.875rem;
-            font-weight: 500;
-            cursor: pointer;
-            transition: all var(--transition-fast);
-            display: flex;
-            align-items: center;
-            gap: 0.5rem;
-            text-decoration: none;
-        }
-        
-        .btn-primary {
-            background: rgba(255, 255, 255, 0.2);
-            color: white;
-            border: 1px solid rgba(255, 255, 255, 0.3);
-        }
-        
-        .btn-primary:hover {
-            background: rgba(255, 255, 255, 0.3);
-            color: white;
-        }
-        
-        .btn-secondary {
-            background: var(--gray-200);
-            color: var(--gray-700);
-        }
-        
-        .btn-secondary:hover {
-            background: var(--gray-300);
-        }
-        
-        /* Upload Area */
         .upload-section {
             background: white;
-            border-radius: var(--radius-lg);
+            border-radius: var(--border-radius);
             box-shadow: var(--shadow-sm);
-            border: 1px solid var(--gray-200);
-            margin-bottom: 1.5rem;
-            overflow: hidden;
-        }
-        
-        .upload-header {
-            padding: 1rem 1.5rem;
-            background: var(--gray-50);
-            border-bottom: 1px solid var(--gray-200);
-        }
-        
-        .upload-content {
             padding: 1.5rem;
+            margin-bottom: 1.5rem;
         }
         
         .dropzone {
-            border: 2px dashed var(--gray-300);
-            border-radius: var(--radius-lg);
-            padding: 3rem;
+            border: 2px dashed var(--border-color);
+            border-radius: var(--border-radius);
+            padding: 2rem;
             text-align: center;
-            transition: all var(--transition-fast);
             cursor: pointer;
-            position: relative;
+            transition: all 0.3s ease;
+            background: var(--gray-50);
         }
         
         .dropzone:hover,
         .dropzone.dragover {
-            border-color: var(--primary-green);
-            background: var(--gray-50);
-        }
-        
-        .dropzone-content {
-            display: flex;
-            flex-direction: column;
-            align-items: center;
-            gap: 1rem;
-        }
-        
-        .dropzone-icon {
-            font-size: 3rem;
-            color: var(--gray-400);
+            border-color: var(--primary-color);
+            background: var(--primary-50);
         }
         
         .dropzone-text {
-            font-size: 1.125rem;
-            font-weight: 500;
-            color: var(--gray-700);
-        }
-        
-        .dropzone-subtext {
-            font-size: 0.875rem;
-            color: var(--gray-500);
-        }
-        
-        .file-input {
-            position: absolute;
-            top: 0;
-            left: 0;
-            width: 100%;
-            height: 100%;
-            opacity: 0;
-            cursor: pointer;
-        }
-        
-        /* Documents Grid */
-        .docs-grid {
-            display: grid;
-            grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
-            gap: 1rem;
-        }
-        
-        .doc-card {
-            background: white;
-            border-radius: var(--radius-lg);
-            box-shadow: var(--shadow-sm);
-            border: 1px solid var(--gray-200);
-            overflow: hidden;
-            transition: all var(--transition-fast);
-        }
-        
-        .doc-card:hover {
-            transform: translateY(-2px);
-            box-shadow: var(--shadow-md);
-        }
-        
-        .doc-header {
-            padding: 1rem;
-            background: var(--gray-50);
-            border-bottom: 1px solid var(--gray-200);
-            display: flex;
-            align-items: center;
-            justify-content: space-between;
-        }
-        
-        .doc-category {
-            display: flex;
-            align-items: center;
-            gap: 0.5rem;
-            font-size: 0.875rem;
-            font-weight: 500;
-            color: var(--gray-700);
-        }
-        
-        .doc-actions {
-            display: flex;
-            gap: 0.25rem;
-        }
-        
-        .btn-icon {
-            width: 24px;
-            height: 24px;
-            border: none;
-            border-radius: var(--radius-md);
-            cursor: pointer;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            font-size: 0.75rem;
-            transition: all var(--transition-fast);
-        }
-        
-        .btn-view {
-            background: var(--accent-blue);
-            color: white;
-        }
-        
-        .btn-download {
-            background: var(--success-green);
-            color: white;
-        }
-        
-        .btn-delete {
-            background: var(--danger-red);
-            color: white;
-        }
-        
-        .btn-icon:hover {
-            transform: scale(1.1);
-        }
-        
-        .doc-content {
-            padding: 1rem;
-        }
-        
-        .doc-name {
-            font-size: 0.875rem;
-            font-weight: 600;
-            color: var(--gray-900);
-            margin-bottom: 0.5rem;
-            word-break: break-word;
-        }
-        
-        .doc-meta {
-            display: grid;
-            grid-template-columns: 1fr 1fr;
-            gap: 0.5rem;
+            color: var(--text-secondary);
             margin-bottom: 1rem;
         }
         
-        .meta-item {
-            font-size: 0.75rem;
-            color: var(--gray-600);
+        .documenti-grid {
+            display: grid;
+            gap: 1rem;
+            margin-top: 1rem;
         }
         
-        .meta-label {
-            font-weight: 500;
-        }
-        
-        .doc-description {
-            font-size: 0.75rem;
-            color: var(--gray-600);
-            background: var(--gray-50);
-            padding: 0.5rem;
-            border-radius: var(--radius-md);
-            margin-top: 0.5rem;
-        }
-        
-        /* Preview Modal */
-        .modal {
-            position: fixed;
-            top: 0;
-            left: 0;
-            width: 100%;
-            height: 100%;
-            background: rgba(0, 0, 0, 0.8);
-            display: none;
-            align-items: center;
-            justify-content: center;
-            z-index: 1000;
-        }
-        
-        .modal-content {
+        .documento-card {
             background: white;
-            border-radius: var(--radius-lg);
-            max-width: 90vw;
-            max-height: 90vh;
+            border: 1px solid var(--border-color);
+            border-radius: var(--border-radius);
+            padding: 1rem;
+            display: flex;
+            align-items: center;
+            gap: 1rem;
+            transition: all 0.2s ease;
+        }
+        
+        .documento-card:hover {
+            box-shadow: var(--shadow-md);
+            transform: translateY(-1px);
+        }
+        
+        .documento-icon {
+            font-size: 2rem;
+            flex-shrink: 0;
+        }
+        
+        .documento-info {
+            flex: 1;
+            min-width: 0;
+        }
+        
+        .documento-nome {
+            font-weight: 500;
+            color: var(--text-primary);
+            white-space: nowrap;
             overflow: hidden;
-            position: relative;
+            text-overflow: ellipsis;
         }
         
-        .modal-header {
-            padding: 1rem 1.5rem;
-            background: var(--gray-50);
-            border-bottom: 1px solid var(--gray-200);
+        .documento-meta {
+            font-size: 0.8rem;
+            color: var(--text-secondary);
+            margin-top: 0.2rem;
+        }
+        
+        .documento-actions {
             display: flex;
-            align-items: center;
-            justify-content: space-between;
+            gap: 0.5rem;
+            flex-shrink: 0;
         }
         
-        .modal-title {
-            font-size: 1rem;
-            font-weight: 600;
-        }
-        
-        .modal-close {
-            width: 32px;
-            height: 32px;
-            border: none;
-            background: var(--gray-200);
-            border-radius: 50%;
+        .btn-icon {
+            padding: 0.4rem;
+            font-size: 0.9rem;
+            border-radius: var(--border-radius-sm);
+            border: 1px solid transparent;
+            background: transparent;
             cursor: pointer;
-            display: flex;
-            align-items: center;
-            justify-content: center;
+            transition: all 0.2s ease;
         }
         
-        .modal-body {
-            padding: 1.5rem;
-            max-height: 70vh;
-            overflow: auto;
+        .btn-icon:hover {
+            background: var(--gray-100);
+            border-color: var(--border-color);
         }
         
-        /* Progress Bar */
-        .progress-container {
-            margin: 1rem 0;
+        .btn-icon.danger:hover {
+            color: var(--danger-red);
+            border-color: var(--danger-red);
+        }
+        
+        .upload-progress {
+            margin-top: 1rem;
             display: none;
         }
         
         .progress-bar {
-            width: 100%;
-            height: 8px;
+            height: 4px;
             background: var(--gray-200);
-            border-radius: 4px;
+            border-radius: 2px;
             overflow: hidden;
         }
         
         .progress-fill {
             height: 100%;
-            background: var(--primary-green);
+            background: var(--primary-color);
             width: 0%;
             transition: width 0.3s ease;
         }
         
-        /* Empty State */
+        /* Categorie select */
+        .categoria-select {
+            margin-top: 1rem;
+            display: flex;
+            gap: 0.5rem;
+            align-items: center;
+        }
+        
+        .categoria-select select {
+            padding: 0.4rem 0.8rem;
+            border: 1px solid var(--border-color);
+            border-radius: var(--border-radius-sm);
+            font-size: 0.9rem;
+        }
+        
+        /* Filtri documenti */
+        .filtri-documenti {
+            display: flex;
+            gap: 0.5rem;
+            margin-bottom: 1rem;
+            flex-wrap: wrap;
+        }
+        
+        .filter-chip {
+            padding: 0.3rem 0.8rem;
+            border: 1px solid var(--border-color);
+            border-radius: var(--border-radius-sm);
+            background: white;
+            font-size: 0.85rem;
+            cursor: pointer;
+            transition: all 0.2s ease;
+        }
+        
+        .filter-chip:hover {
+            background: var(--gray-50);
+        }
+        
+        .filter-chip.active {
+            background: var(--primary-color);
+            color: white;
+            border-color: var(--primary-color);
+        }
+        
+        /* Empty state */
         .empty-state {
             text-align: center;
-            padding: 3rem;
-            color: var(--gray-500);
+            padding: 3rem 1rem;
+            color: var(--text-secondary);
         }
         
         .empty-state-icon {
-            font-size: 4rem;
+            font-size: 3rem;
+            opacity: 0.5;
             margin-bottom: 1rem;
-        }
-        
-        /* Responsive */
-        @media (max-width: 768px) {
-            .docs-grid {
-                grid-template-columns: 1fr;
-            }
-            
-            .docs-header {
-                flex-direction: column;
-                align-items: stretch;
-            }
-            
-            .dropzone {
-                padding: 2rem 1rem;
-            }
-            
-            .doc-meta {
-                grid-template-columns: 1fr;
-            }
         }
     </style>
 </head>
 <body>
-    <!-- Sidebar uniforme -->
-    <div class="sidebar">
-        <div class="sidebar-header">
-            <h2>📊 CRM</h2>
-        </div>
-        
-        <nav class="nav">
-            <div class="nav-section">
-                <div class="nav-item">
-                    <a href="/crm/dashboard.php" class="nav-link">
-                        <span>🏠</span> Dashboard
-                    </a>
-                </div>
-                <div class="nav-item">
-                    <a href="/crm/modules/operatori/index.php" class="nav-link">
-                        <span>👥</span> Operatori
-                    </a>
-                </div>
-                <div class="nav-item">
-                    <a href="/crm/modules/clienti/index.php" class="nav-link">
-                        <span>🏢</span> Clienti
-                    </a>
-                </div>
-            </div>
-        </nav>
-    </div>
+    <!-- Navigation -->
+    <?php include $_SERVER['DOCUMENT_ROOT'] . '/crm/components/navigation.php'; ?>
 
-    <!-- Main Content -->
-    <main class="main-content">
-        <div class="docs-container">
-            <!-- Header -->
-            <div class="docs-header">
-                <div class="docs-title">
-                    📁 Documenti: <?= htmlspecialchars($cliente['ragione_sociale']) ?>
-                    <span style="font-size: 0.875rem; opacity: 0.8;">(<?= count($documenti) ?> documenti)</span>
+    <div class="documenti-container">
+        <!-- Breadcrumb -->
+        <nav class="breadcrumb" style="margin-bottom: 1rem;">
+            <a href="/crm/">Home</a>
+            <span class="separator">/</span>
+            <a href="/crm/?action=clienti">Clienti</a>
+            <span class="separator">/</span>
+            <a href="/crm/?action=clienti&view=view&id=<?= $clienteId ?>">
+                <?= htmlspecialchars($cliente['ragione_sociale']) ?>
+            </a>
+            <span class="separator">/</span>
+            <span class="current">Documenti</span>
+        </nav>
+
+        <!-- Messaggi -->
+        <?php if (!empty($errors)): ?>
+            <div class="alert alert-danger">
+                <?= implode('<br>', $errors) ?>
+            </div>
+        <?php endif; ?>
+        
+        <?php if ($success): ?>
+            <div class="alert alert-success">
+                <?= $success ?>
+            </div>
+        <?php endif; ?>
+
+        <!-- Upload Section -->
+        <div class="upload-section">
+            <h3>📤 Carica Documenti</h3>
+            
+            <form id="uploadForm" method="POST" enctype="multipart/form-data">
+                <input type="hidden" name="action" value="upload">
+                
+                <div class="dropzone" id="dropzone">
+                    <div class="dropzone-text">
+                        📁 Trascina qui i documenti o clicca per selezionare
+                    </div>
+                    <input type="file" id="fileInput" name="files[]" multiple style="display: none;" accept=".pdf,.doc,.docx,.xls,.xlsx,.jpg,.jpeg,.png,.gif,.txt">
+                    <button type="button" class="btn btn-secondary" onclick="document.getElementById('fileInput').click()">
+                        Seleziona Files
+                    </button>
                 </div>
-                <div class="docs-actions">
-                    <button class="btn btn-primary" onclick="showUploadSection()">
+                
+                <div class="categoria-select">
+                    <label>Categoria:</label>
+                    <select name="categoria" id="categoriaSelect">
+                        <option value="generale">📎 Generale</option>
+                        <option value="contratto">📄 Contratti</option>
+                        <option value="fattura">🧾 Fatture</option>
+                        <option value="documento_identita">🪪 Documenti Identità</option>
+                        <option value="visura">🏢 Visure</option>
+                        <option value="bilancio">📊 Bilanci</option>
+                        <option value="dichiarazione">📋 Dichiarazioni</option>
+                    </select>
+                    
+                    <input type="text" name="note" placeholder="Note (opzionale)" style="flex: 1;">
+                    
+                    <button type="submit" id="uploadButton" class="btn btn-primary" disabled>
                         📤 Carica Documenti
                     </button>
-                    <a href="/crm/modules/clienti/view.php?id=<?= $clienteId ?>" class="btn btn-primary">
-                        👁️ Torna al Cliente
-                    </a>
                 </div>
-            </div>
+                
+                <div class="upload-progress" id="uploadProgress">
+                    <div class="progress-bar">
+                        <div class="progress-fill" id="progressFill"></div>
+                    </div>
+                    <div style="margin-top: 0.5rem; font-size: 0.85rem; color: var(--text-secondary);">
+                        Caricamento in corso...
+                    </div>
+                </div>
+            </form>
+        </div>
 
-            <!-- Error/Success Messages -->
-            <?php if (!empty($errors)): ?>
-                <div style="background: #fee2e2; border: 1px solid #fecaca; color: #991b1b; padding: 1rem; border-radius: var(--radius-md); margin-bottom: 1rem;">
-                    <?php foreach ($errors as $error): ?>
-                        <div>⚠️ <?= htmlspecialchars($error) ?></div>
+        <!-- Lista Documenti -->
+        <div class="upload-section">
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1rem;">
+                <h3>📁 Documenti (<?= count($documenti) ?>)</h3>
+                
+                <!-- Filtri -->
+                <div class="filtri-documenti">
+                    <div class="filter-chip active" data-filter="all">
+                        Tutti
+                    </div>
+                    <?php
+                    $categorie = ['contratto', 'fattura', 'documento_identita', 'visura', 'bilancio', 'dichiarazione', 'generale'];
+                    foreach ($categorie as $cat): ?>
+                        <div class="filter-chip" data-filter="<?= $cat ?>">
+                            <?= getCategoriaIcon($cat) ?> <?= getCategoriaNome($cat) ?>
+                        </div>
                     <?php endforeach; ?>
                 </div>
-            <?php endif; ?>
-
-            <?php if ($success): ?>
-                <div style="background: #dcfce7; border: 1px solid #bbf7d0; color: #166534; padding: 1rem; border-radius: var(--radius-md); margin-bottom: 1rem;">
-                    ✅ <?= htmlspecialchars($success) ?>
-                </div>
-            <?php endif; ?>
-
-            <!-- Upload Section -->
-            <div class="upload-section" id="uploadSection">
-                <div class="upload-header">
-                    <h3>📤 Carica Nuovi Documenti</h3>
-                </div>
-                <div class="upload-content">
-                    <form method="POST" enctype="multipart/form-data" id="uploadForm">
-                        <input type="hidden" name="action" value="upload">
-                        
-                        <div class="dropzone" id="dropzone">
-                            <input type="file" name="files[]" multiple class="file-input" id="fileInput" 
-                                   accept=".pdf,.doc,.docx,.xls,.xlsx,.jpg,.jpeg,.png,.gif,.txt">
-                            <div class="dropzone-content">
-                                <div class="dropzone-icon">📁</div>
-                                <div class="dropzone-text">Trascina i file qui o clicca per selezionare</div>
-                                <div class="dropzone-subtext">
-                                    Formati supportati: PDF, DOC, DOCX, XLS, XLSX, JPG, PNG, GIF, TXT<br>
-                                    Dimensione massima: 50MB per file
-                                </div>
-                            </div>
-                        </div>
-                        
-                        <div class="progress-container" id="progressContainer">
-                            <div class="progress-bar">
-                                <div class="progress-fill" id="progressFill"></div>
-                            </div>
-                            <div id="progressText" style="text-align: center; margin-top: 0.5rem; font-size: 0.875rem;"></div>
-                        </div>
-                        
-                        <div style="margin-top: 1rem; text-align: center;">
-                            <button type="submit" class="btn btn-secondary" id="uploadButton" disabled>
-                                📤 Carica Documenti
-                            </button>
-                        </div>
-                    </form>
-                </div>
             </div>
-
-            <!-- Documents Grid -->
+            
             <?php if (empty($documenti)): ?>
                 <div class="empty-state">
-                    <div class="empty-state-icon">📂</div>
-                    <h3>Nessun documento caricato</h3>
-                    <p>Inizia caricando il primo documento per questo cliente</p>
+                    <div class="empty-state-icon">📭</div>
+                    <p>Nessun documento caricato per questo cliente</p>
                 </div>
             <?php else: ?>
-                <div class="docs-grid">
+                <div class="documenti-grid">
                     <?php foreach ($documenti as $doc): ?>
-                        <div class="doc-card">
-                            <div class="doc-header">
-                                <div class="doc-category">
-                                    <?= getCategoryIcon($doc['categoria']) ?>
-                                    <?= ucfirst(str_replace('_', ' ', $doc['categoria'])) ?>
+                        <div class="documento-card" data-categoria="<?= $doc['categoria'] ?>">
+                            <div class="documento-icon">
+                                <?= getCategoriaIcon($doc['categoria']) ?>
+                            </div>
+                            
+                            <div class="documento-info">
+                                <div class="documento-nome">
+                                    <?= htmlspecialchars($doc['nome_file_originale']) ?>
                                 </div>
-                                <div class="doc-actions">
-                                    <?php if (canPreview($doc['tipo_mime'])): ?>
-                                        <button class="btn-icon btn-view" onclick="previewDocument(<?= $doc['id'] ?>)" title="Anteprima">
-                                            👁️
-                                        </button>
-                                    <?php endif; ?>
-                                    <button class="btn-icon btn-download" onclick="downloadDocument(<?= $doc['id'] ?>)" title="Scarica">
-                                        📥
-                                    </button>
-                                    <?php if ($sessionInfo['is_admin'] || $doc['operatore_id'] == $sessionInfo['user_id']): ?>
-                                        <button class="btn-icon btn-delete" onclick="deleteDocument(<?= $doc['id'] ?>)" title="Elimina">
-                                            🗑️
-                                        </button>
+                                <div class="documento-meta">
+                                    <?= formatFileSize($doc['dimensione']) ?> • 
+                                    <?= date('d/m/Y H:i', strtotime($doc['data_upload'])) ?> • 
+                                    <?= htmlspecialchars($doc['operatore_upload_nome']) ?>
+                                    <?php if ($doc['note']): ?>
+                                        <br>📝 <?= htmlspecialchars($doc['note']) ?>
                                     <?php endif; ?>
                                 </div>
                             </div>
                             
-                            <div class="doc-content">
-                                <div class="doc-name"><?= htmlspecialchars($doc['nome_originale']) ?></div>
-                                
-                                <div class="doc-meta">
-                                    <div class="meta-item">
-                                        <span class="meta-label">Dimensione:</span><br>
-                                        <?= formatFileSize($doc['dimensione_file']) ?>
-                                    </div>
-                                    <div class="meta-item">
-                                        <span class="meta-label">Caricato:</span><br>
-                                        <?= date('d/m/Y', strtotime($doc['data_upload'])) ?>
-                                    </div>
-                                    <div class="meta-item">
-                                        <span class="meta-label">Da:</span><br>
-                                        <?= htmlspecialchars($doc['operatore_upload_nome']) ?>
-                                    </div>
-                                    <div class="meta-item">
-                                        <span class="meta-label">Accessi:</span><br>
-                                        <?= $doc['numero_accessi'] ?> volte
-                                    </div>
-                                </div>
-                                
-                                <?php if ($doc['descrizione']): ?>
-                                    <div class="doc-description">
-                                        <?= htmlspecialchars($doc['descrizione']) ?>
-                                    </div>
+                            <div class="documento-actions">
+                                <a href="/crm/uploads/clienti/<?= $clienteId ?>/<?= $doc['nome_file_salvato'] ?>" 
+                                   target="_blank" 
+                                   class="btn-icon" 
+                                   title="Visualizza">
+                                    👁️
+                                </a>
+                                <a href="/crm/uploads/clienti/<?= $clienteId ?>/<?= $doc['nome_file_salvato'] ?>" 
+                                   download="<?= $doc['nome_file_originale'] ?>"
+                                   class="btn-icon" 
+                                   title="Scarica">
+                                    ⬇️
+                                </a>
+                                <?php if ($sessionInfo['is_admin']): ?>
+                                    <form method="POST" style="display: inline;" onsubmit="return confirm('Eliminare questo documento?');">
+                                        <input type="hidden" name="action" value="delete">
+                                        <input type="hidden" name="documento_id" value="<?= $doc['id'] ?>">
+                                        <button type="submit" class="btn-icon danger" title="Elimina">
+                                            🗑️
+                                        </button>
+                                    </form>
                                 <?php endif; ?>
                             </div>
                         </div>
@@ -936,38 +606,48 @@ function canPreview($mimeType) {
                 </div>
             <?php endif; ?>
         </div>
-    </main>
-
-    <!-- Preview Modal -->
-    <div class="modal" id="previewModal">
-        <div class="modal-content">
-            <div class="modal-header">
-                <div class="modal-title">📄 Anteprima Documento</div>
-                <button class="modal-close" onclick="closePreview()">✕</button>
-            </div>
-            <div class="modal-body" id="previewContent">
-                <!-- Content loaded dynamically -->
-            </div>
-        </div>
     </div>
 
-    <!-- JavaScript -->
     <script>
         // Variabili globali
         let selectedFiles = [];
         
-        // Event listeners
+        // Setup al caricamento pagina
         document.addEventListener('DOMContentLoaded', function() {
             setupDropzone();
             setupFileInput();
-            
-            // Nascondi upload section inizialmente
-            document.getElementById('uploadSection').style.display = 'none';
+            setupFilters();
         });
         
-        function showUploadSection() {
-            const section = document.getElementById('uploadSection');
-            section.style.display = section.style.display === 'none' ? 'block' : 'none';
+        // Gestione filtri
+        function setupFilters() {
+            const chips = document.querySelectorAll('.filter-chip');
+            const cards = document.querySelectorAll('.documento-card');
+            
+            chips.forEach(chip => {
+                chip.addEventListener('click', function() {
+                    // Rimuovi active da tutti
+                    chips.forEach(c => c.classList.remove('active'));
+                    this.classList.add('active');
+                    
+                    const filter = this.dataset.filter;
+                    
+                    // Mostra/nascondi cards
+                    cards.forEach(card => {
+                        if (filter === 'all' || card.dataset.categoria === filter) {
+                            card.style.display = 'flex';
+                        } else {
+                            card.style.display = 'none';
+                        }
+                    });
+                });
+            });
+        }
+        
+        // Toggle categoria details
+        function toggleCategoria(categoria) {
+            const details = document.getElementById('cat-' + categoria);
+            details.style.display = details.style.display === 'none' ? 'block' : 'none';
         }
         
         function setupDropzone() {
@@ -1036,118 +716,32 @@ function canPreview($mimeType) {
             if (selectedFiles.length > 0) {
                 dropzoneText.textContent = `${selectedFiles.length} file${selectedFiles.length > 1 ? 's' : ''} selezionato${selectedFiles.length > 1 ? 'i' : ''}`;
             } else {
-                dropzoneText.textContent = 'Trascina i file qui o clicca per selezionare';
+                dropzoneText.textContent = '📁 Trascina qui i documenti o clicca per selezionare';
             }
         }
         
-        // Upload con progress
+        // Gestione form upload
         document.getElementById('uploadForm').addEventListener('submit', function(e) {
-            e.preventDefault();
-            
             if (selectedFiles.length === 0) {
-                alert('Seleziona almeno un file');
+                e.preventDefault();
                 return;
             }
             
-            const formData = new FormData();
-            formData.append('action', 'upload');
+            // Mostra progress
+            document.getElementById('uploadProgress').style.display = 'block';
+            document.getElementById('uploadButton').disabled = true;
             
-            selectedFiles.forEach(file => {
-                formData.append('files[]', file);
-            });
-            
-            uploadWithProgress(formData);
-        });
-        
-        function uploadWithProgress(formData) {
-            const progressContainer = document.getElementById('progressContainer');
-            const progressFill = document.getElementById('progressFill');
-            const progressText = document.getElementById('progressText');
-            const uploadButton = document.getElementById('uploadButton');
-            
-            progressContainer.style.display = 'block';
-            uploadButton.disabled = true;
-            uploadButton.textContent = '⏳ Caricamento...';
-            
-            const xhr = new XMLHttpRequest();
-            
-            xhr.upload.addEventListener('progress', function(e) {
-                if (e.lengthComputable) {
-                    const percentComplete = (e.loaded / e.total) * 100;
-                    progressFill.style.width = percentComplete + '%';
-                    progressText.textContent = `Caricamento: ${Math.round(percentComplete)}%`;
+            // Simula progress (in produzione usereste XMLHttpRequest per progress reale)
+            let progress = 0;
+            const interval = setInterval(() => {
+                progress += 10;
+                document.getElementById('progressFill').style.width = progress + '%';
+                
+                if (progress >= 90) {
+                    clearInterval(interval);
                 }
-            });
-            
-            xhr.addEventListener('load', function() {
-                if (xhr.status === 200) {
-                    progressText.textContent = 'Caricamento completato!';
-                    setTimeout(() => {
-                        location.reload();
-                    }, 1500);
-                } else {
-                    progressText.textContent = 'Errore durante il caricamento';
-                    uploadButton.disabled = false;
-                    uploadButton.textContent = '📤 Riprova';
-                }
-            });
-            
-            xhr.addEventListener('error', function() {
-                progressText.textContent = 'Errore di connessione';
-                uploadButton.disabled = false;
-                uploadButton.textContent = '📤 Riprova';
-            });
-            
-            xhr.open('POST', window.location.href);
-            xhr.send(formData);
-        }
-        
-        // Funzioni per azioni documenti
-        function downloadDocument(id) {
-            window.open(`?download=${id}`, '_blank');
-        }
-        
-        function previewDocument(id) {
-            // Implementazione anteprima (PDF/immagini)
-            const modal = document.getElementById('previewModal');
-            const content = document.getElementById('previewContent');
-            
-            content.innerHTML = '<div style="text-align: center; padding: 2rem;">⏳ Caricamento anteprima...</div>';
-            modal.style.display = 'flex';
-            
-            // TODO: Implementare anteprima vera
-            setTimeout(() => {
-                content.innerHTML = '<div style="text-align: center; padding: 2rem;">📄 Anteprima non ancora implementata</div>';
-            }, 1000);
-        }
-        
-        function closePreview() {
-            document.getElementById('previewModal').style.display = 'none';
-        }
-        
-        function deleteDocument(id) {
-            if (!confirm('Sicuro di voler eliminare questo documento? L\'azione non può essere annullata.')) {
-                return;
-            }
-            
-            const form = document.createElement('form');
-            form.method = 'POST';
-            form.innerHTML = `
-                <input type="hidden" name="action" value="delete">
-                <input type="hidden" name="documento_id" value="${id}">
-            `;
-            document.body.appendChild(form);
-            form.submit();
-        }
-        
-        // Chiudi modal cliccando fuori
-        document.getElementById('previewModal').addEventListener('click', function(e) {
-            if (e.target === this) {
-                closePreview();
-            }
+            }, 200);
         });
-        
-        console.log('Gestione documenti caricata per cliente <?= $clienteId ?>');
     </script>
 </body>
 </html>
