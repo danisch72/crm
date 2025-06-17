@@ -2,7 +2,7 @@
 /**
  * modules/clienti/create.php - Creazione Nuovo Cliente CRM Re.De Consulting
  * 
- * ✅ VERSIONE DEFINITIVA CON COMPONENTI CENTRALIZZATI
+ * ✅ VERSIONE AGGIORNATA CON TUTTI I CAMPI DATABASE
  * ✅ LAYOUT ULTRA-COMPATTO DATEV OPTIMAL
  * 
  * Features:
@@ -10,6 +10,7 @@
  * - Layout compatto a 2 colonne
  * - Validazione CF/P.IVA in tempo reale
  * - Design Datev Optimal
+ * - NUOVO: regime_fiscale, liquidazione_iva, note_generali
  */
 
 // Avvia sessione se non già attiva
@@ -64,7 +65,10 @@ $formData = [
     'email' => '',
     'pec' => '',
     'operatore_responsabile_id' => $sessionInfo['operatore_id'],
-    'note' => ''
+    'regime_fiscale' => '',
+    'liquidazione_iva' => '',
+    'note' => '',
+    'note_generali' => ''
 ];
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
@@ -81,8 +85,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         'telefono' => trim($_POST['telefono'] ?? ''),
         'email' => strtolower(trim($_POST['email'] ?? '')),
         'pec' => strtolower(trim($_POST['pec'] ?? '')),
-           'operatore_responsabile_id' => (int)($_POST['operatore_responsabile_id'] ?? $sessionInfo['operatore_id']),
-        'note' => trim($_POST['note'] ?? '')
+        'operatore_responsabile_id' => (int)($_POST['operatore_responsabile_id'] ?? $sessionInfo['operatore_id']),
+        'regime_fiscale' => $_POST['regime_fiscale'] ?? '',
+        'liquidazione_iva' => $_POST['liquidazione_iva'] ?? '',
+        'note' => trim($_POST['note'] ?? ''),
+        'note_generali' => trim($_POST['note_generali'] ?? '')
     ];
     
     // Validazioni
@@ -94,7 +101,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $errors[] = "Tipologia azienda obbligatoria";
     }
     
-    // Validazione CF/P.IVA in base a tipologia
+    // Validazione condizionale CF/P.IVA
     if ($formData['tipologia_azienda'] === 'individuale') {
         if (empty($formData['codice_fiscale'])) {
             $errors[] = "Codice fiscale obbligatorio per ditte individuali";
@@ -109,8 +116,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         }
     }
     
-    if (!empty($formData['cap']) && !preg_match('/^\d{5}$/', $formData['cap'])) {
+    // Validazioni formato
+    if (!empty($formData['cap']) && !preg_match('/^[0-9]{5}$/', $formData['cap'])) {
         $errors[] = "CAP non valido (5 cifre)";
+    }
+    
+    if (!empty($formData['provincia']) && !preg_match('/^[A-Z]{2}$/', $formData['provincia'])) {
+        $errors[] = "Provincia non valida (2 lettere)";
     }
     
     if (!empty($formData['email']) && !filter_var($formData['email'], FILTER_VALIDATE_EMAIL)) {
@@ -121,9 +133,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $errors[] = "PEC non valida";
     }
     
-    // Verifica unicità CF/P.IVA
+    // Se non ci sono errori, procedi con l'inserimento
     if (empty($errors)) {
         try {
+            // Verifica unicità CF/P.IVA
             if (!empty($formData['codice_fiscale'])) {
                 $existing = $db->selectOne(
                     "SELECT id FROM clienti WHERE codice_fiscale = ?", 
@@ -145,9 +158,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             }
             
             if (empty($errors)) {
+                // Genera codice cliente automatico
+                $codiceCliente = generateCodiceCliente($formData['tipologia_azienda'], $db);
+                
                 // Prepara dati per inserimento
                 $insertData = $formData;
+                $insertData['codice_cliente'] = $codiceCliente;
                 $insertData['stato'] = 'attivo';
+                $insertData['is_attivo'] = 1; // Anche se ridondante, lo impostiamo per compatibilità
                 $insertData['created_by'] = $sessionInfo['operatore_id'];
                 $insertData['created_at'] = date('Y-m-d H:i:s');
                 
@@ -216,54 +234,62 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         
         .form-grid {
             display: grid;
-            grid-template-columns: repeat(2, 1fr);
-            gap: 0.75rem;
+            grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+            gap: 1rem;
         }
         
         .form-section {
-            margin-bottom: 1rem;
+            margin-bottom: 1.5rem;
         }
         
         .section-title {
-            font-size: 0.813rem;
+            font-size: 0.875rem;
             font-weight: 600;
             color: var(--gray-700);
-            margin-bottom: 0.5rem;
+            margin-bottom: 0.75rem;
             display: flex;
             align-items: center;
             gap: 0.375rem;
         }
         
         .form-group {
-            margin-bottom: 0.625rem;
+            margin-bottom: 0;
         }
         
         .form-label {
             display: block;
-            margin-bottom: 0.25rem;
-            font-size: 0.75rem;
+            font-size: 0.8125rem;
             font-weight: 500;
             color: var(--gray-700);
+            margin-bottom: 0.25rem;
         }
         
         .form-label-required::after {
             content: ' *';
-            color: var(--color-danger);
+            color: var(--danger-red);
         }
         
         .form-control {
             width: 100%;
             padding: 0.375rem 0.625rem;
-            font-size: 0.813rem;
+            font-size: 0.8125rem;
+            line-height: 1.4;
+            color: var(--gray-900);
+            background-color: white;
             border: 1px solid var(--gray-300);
             border-radius: 4px;
-            transition: all 0.2s;
+            transition: all 0.15s ease;
         }
         
         .form-control:focus {
             outline: none;
-            border-color: var(--primary-green);
-            box-shadow: 0 0 0 2px rgba(0, 120, 73, 0.1);
+            border-color: var(--primary-blue);
+            box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.1);
+        }
+        
+        .form-control:disabled {
+            background-color: var(--gray-50);
+            cursor: not-allowed;
         }
         
         textarea.form-control {
@@ -271,60 +297,39 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             min-height: 60px;
         }
         
-        .form-hint {
-            font-size: 0.688rem;
-            color: var(--gray-500);
-            margin-top: 0.125rem;
-        }
-        
         .form-actions {
             display: flex;
+            justify-content: flex-end;
             gap: 0.75rem;
-            justify-content: space-between;
-            margin-top: 1rem;
+            margin-top: 1.5rem;
             padding-top: 1rem;
             border-top: 1px solid var(--gray-200);
         }
         
         .error-list {
-            background: var(--color-danger-light);
-            border: 1px solid var(--color-danger);
+            background-color: #fef2f2;
+            border: 1px solid #fecaca;
             border-radius: 4px;
-            padding: 0.625rem;
-            margin-bottom: 0.75rem;
+            padding: 0.75rem;
+            margin-bottom: 1rem;
         }
         
         .error-list ul {
             margin: 0;
-            padding-left: 1rem;
+            padding-left: 1.25rem;
+            font-size: 0.8125rem;
+            color: #dc2626;
         }
         
-        .error-list li {
-            color: var(--color-danger);
+        .form-help {
             font-size: 0.75rem;
-            line-height: 1.3;
-        }
-        
-        /* Grid responsive più ampio */
-        @media (min-width: 1200px) {
-            .form-grid {
-                grid-template-columns: repeat(3, 1fr);
-            }
-        }
-        
-        @media (max-width: 768px) {
-            .form-grid {
-                grid-template-columns: 1fr;
-            }
-            
-            .form-actions {
-                flex-direction: column;
-            }
+            color: var(--gray-500);
+            margin-top: 0.25rem;
         }
     </style>
 </head>
-<body class="datev-compact">
-    <div class="app-layout">
+<body class="datev-body">
+    <div class="datev-container">
         <!-- ✅ COMPONENTE SIDEBAR (OBBLIGATORIO) -->
         <?php include $_SERVER['DOCUMENT_ROOT'] . '/crm/components/navigation.php'; ?>
         
@@ -385,6 +390,25 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                                 </div>
                                 
                                 <div class="form-group">
+                                    <label class="form-label" id="labelCodiceFiscale">Codice Fiscale</label>
+                                    <input type="text" 
+                                           name="codice_fiscale" 
+                                           class="form-control" 
+                                           value="<?= htmlspecialchars($formData['codice_fiscale']) ?>"
+                                           maxlength="16"
+                                           style="text-transform: uppercase;">
+                                </div>
+                                
+                                <div class="form-group">
+                                    <label class="form-label" id="labelPartitaIva">Partita IVA</label>
+                                    <input type="text" 
+                                           name="partita_iva" 
+                                           class="form-control" 
+                                           value="<?= htmlspecialchars($formData['partita_iva']) ?>"
+                                           maxlength="11">
+                                </div>
+                                
+                                <div class="form-group">
                                     <label class="form-label">Operatore Responsabile</label>
                                     <select name="operatore_responsabile_id" class="form-control">
                                         <?php foreach ($operatori as $op): ?>
@@ -397,42 +421,43 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                             </div>
                         </div>
                         
-                        <!-- Dati fiscali -->
+                        <!-- Dati Fiscali -->
                         <div class="form-section">
                             <h3 class="section-title">
-                                <span>🧾</span>
+                                <span>💰</span>
                                 <span>Dati Fiscali</span>
                             </h3>
                             
                             <div class="form-grid">
                                 <div class="form-group">
-                                    <label class="form-label" id="labelCodiceFiscale">Codice Fiscale</label>
-                                    <input type="text" 
-                                           name="codice_fiscale" 
-                                           class="form-control" 
-                                           value="<?= htmlspecialchars($formData['codice_fiscale']) ?>"
-                                           maxlength="16"
-                                           style="text-transform: uppercase;">
-                                    <div class="form-hint">16 caratteri per persone fisiche</div>
+                                    <label class="form-label">Regime Fiscale</label>
+                                    <select name="regime_fiscale" class="form-control">
+                                        <option value="">Seleziona...</option>
+                                        <option value="ordinario" <?= $formData['regime_fiscale'] === 'ordinario' ? 'selected' : '' ?>>Ordinario</option>
+                                        <option value="semplificato" <?= $formData['regime_fiscale'] === 'semplificato' ? 'selected' : '' ?>>Semplificato</option>
+                                        <option value="forfettario" <?= $formData['regime_fiscale'] === 'forfettario' ? 'selected' : '' ?>>Forfettario</option>
+                                        <option value="altro" <?= $formData['regime_fiscale'] === 'altro' ? 'selected' : '' ?>>Altro</option>
+                                    </select>
                                 </div>
                                 
                                 <div class="form-group">
-                                    <label class="form-label" id="labelPartitaIva">Partita IVA</label>
-                                    <input type="text" 
-                                           name="partita_iva" 
-                                           class="form-control" 
-                                           value="<?= htmlspecialchars($formData['partita_iva']) ?>"
-                                           maxlength="11">
-                                    <div class="form-hint">11 cifre numeriche</div>
+                                    <label class="form-label">Liquidazione IVA</label>
+                                    <select name="liquidazione_iva" class="form-control">
+                                        <option value="">Seleziona...</option>
+                                        <option value="mensile" <?= $formData['liquidazione_iva'] === 'mensile' ? 'selected' : '' ?>>Mensile</option>
+                                        <option value="trimestrale" <?= $formData['liquidazione_iva'] === 'trimestrale' ? 'selected' : '' ?>>Trimestrale</option>
+                                        <option value="fuori campo" <?= $formData['liquidazione_iva'] === 'fuori campo' ? 'selected' : '' ?>>Fuori Campo IVA</option>
+                                        <option value="esente" <?= $formData['liquidazione_iva'] === 'esente' ? 'selected' : '' ?>>Esente IVA</option>
+                                    </select>
                                 </div>
                             </div>
                         </div>
                         
-                        <!-- Recapiti -->
+                        <!-- Contatti -->
                         <div class="form-section">
                             <h3 class="section-title">
                                 <span>📍</span>
-                                <span>Recapiti e Contatti</span>
+                                <span>Sede e Contatti</span>
                             </h3>
                             
                             <div class="form-grid">
@@ -512,6 +537,22 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                             </div>
                         </div>
                         
+                        <!-- Note Generali -->
+                        <div class="form-section">
+                            <h3 class="section-title">
+                                <span>💬</span>
+                                <span>Note Generali</span>
+                            </h3>
+                            
+                            <div class="form-group">
+                                <textarea name="note_generali" 
+                                          class="form-control" 
+                                          rows="2"
+                                          placeholder="Commenti generali sulla ditta..."><?= htmlspecialchars($formData['note_generali']) ?></textarea>
+                                <div class="form-help">Visibile a tutti gli operatori</div>
+                            </div>
+                        </div>
+                        
                         <!-- Azioni -->
                         <div class="form-actions">
                             <a href="/crm/?action=clienti" class="btn btn-secondary">
@@ -547,11 +588,21 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     // Trigger iniziale
     document.getElementById('tipologiaAzienda').dispatchEvent(new Event('change'));
     
-    // Auto uppercase
+    // Auto uppercase per campi specifici
     document.querySelectorAll('input[style*="text-transform: uppercase"]').forEach(input => {
         input.addEventListener('input', function() {
             this.value = this.value.toUpperCase();
         });
+    });
+    
+    // Validazione dinamica regime fiscale e IVA
+    document.querySelector('select[name="regime_fiscale"]').addEventListener('change', function() {
+        const liquidazioneSelect = document.querySelector('select[name="liquidazione_iva"]');
+        
+        // Se forfettario, preseleziona "fuori campo"
+        if (this.value === 'forfettario') {
+            liquidazioneSelect.value = 'fuori campo';
+        }
     });
     </script>
 </body>
@@ -592,10 +643,36 @@ function isValidPartitaIva($piva) {
             $sum += $digit;
         } else {
             $double = $digit * 2;
-            $sum += $double > 9 ? $double - 9 : $double;
+            $sum += $double > 9 ? ($double - 9) : $double;
         }
     }
     
-    return $sum % 10 == 0;
+    return ($sum % 10) == 0;
+}
+
+function generateCodiceCliente($tipologia, $db) {
+    // Mappa tipologia per prefisso
+    $prefixMap = [
+        'individuale' => 'DI',
+        'srl' => 'AZ',
+        'spa' => 'AZ',
+        'snc' => 'AZ',
+        'sas' => 'AZ'
+    ];
+    
+    $prefix = $prefixMap[$tipologia] ?? 'AZ';
+    $year = date('Y');
+    
+    // Trova l'ultimo numero per questo prefisso e anno
+    $lastCode = $db->selectOne("
+        SELECT MAX(CAST(SUBSTRING(codice_cliente, -4) AS UNSIGNED)) as last_num
+        FROM clienti 
+        WHERE codice_cliente LIKE ?
+    ", [$prefix . $year . '%']);
+    
+    $nextNum = ($lastCode['last_num'] ?? 0) + 1;
+    
+    // Genera codice nel formato PREFISSOANNO0001
+    return $prefix . $year . str_pad($nextNum, 4, '0', STR_PAD_LEFT);
 }
 ?>

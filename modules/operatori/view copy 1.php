@@ -701,7 +701,15 @@ function getTipologiaIcon($tipo) {
                                     <!-- Contratto e Orari -->
                                     <div class="info-section">
                                         <h4>📅 Contratto e Orari</h4>
-                                                                                
+                                        <?php if ($operatore['tipo_contratto']): ?>
+                                        <div class="info-item">
+                                            <span class="info-label">Tipo Contratto</span>
+                                            <span class="info-value">
+                                                <?= ucfirst(str_replace('_', ' ', $operatore['tipo_contratto'])) ?>
+                                            </span>
+                                        </div>
+                                        <?php endif; ?>
+                                        
                                         <?php if ($operatore['orario_mattino_inizio'] && $operatore['orario_mattino_fine']): ?>
                                         <div class="info-item">
                                             <span class="info-label">Orario Mattino</span>

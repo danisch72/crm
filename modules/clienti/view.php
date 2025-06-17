@@ -2,7 +2,7 @@
 /**
  * modules/clienti/view.php - Visualizzazione Dettagli Cliente CRM Re.De Consulting
  * 
- * ✅ VERSIONE DEFINITIVA CON COMPONENTI CENTRALIZZATI
+ * ✅ VERSIONE AGGIORNATA CON TUTTI I CAMPI DATABASE
  * ✅ LAYOUT ULTRA-COMPATTO DATEV OPTIMAL
  * 
  * Features:
@@ -10,6 +10,7 @@
  * - Riepilogo pratiche e documenti
  * - Timeline comunicazioni
  * - Design Datev Optimal
+ * - NUOVO: visualizzazione regime_fiscale, liquidazione_iva, note_generali
  */
 
 // Avvia sessione se non già attiva
@@ -34,8 +35,7 @@ try {
     $cliente = $db->selectOne("
         SELECT c.*, 
                CONCAT(o.nome, ' ', o.cognome) as operatore_nome,
-               o.email as operatore_email,
-               o.telefono as operatore_telefono
+               o.email as operatore_email
         FROM clienti c
         LEFT JOIN operatori o ON c.operatore_responsabile_id = o.id
         WHERE c.id = ?
@@ -51,6 +51,27 @@ try {
     $_SESSION['error_message'] = '⚠️ Errore caricamento dati';
     header('Location: /crm/?action=clienti');
     exit;
+}
+
+// Funzioni helper per formattazione
+function formatRegimeFiscale($regime) {
+    $regimi = [
+        'ordinario' => 'Regime Ordinario',
+        'semplificato' => 'Regime Semplificato',
+        'forfettario' => 'Regime Forfettario',
+        'altro' => 'Altro'
+    ];
+    return $regimi[$regime] ?? $regime;
+}
+
+function formatLiquidazioneIva($liquidazione) {
+    $tipi = [
+        'mensile' => 'Mensile',
+        'trimestrale' => 'Trimestrale',
+        'fuori campo' => 'Fuori Campo IVA',
+        'esente' => 'Esente IVA'
+    ];
+    return $tipi[$liquidazione] ?? $liquidazione;
 }
 
 // Statistiche cliente
@@ -78,7 +99,12 @@ try {
     }
     
     // Documenti
-    $stats['documenti_totali'] = $db->count('documenti_clienti', 'cliente_id = ?', [$clienteId]);
+    $docCount = $db->selectOne("
+        SELECT COUNT(*) as total 
+        FROM documenti_clienti 
+        WHERE cliente_id = ?
+    ", [$clienteId]);
+    $stats['documenti_totali'] = $docCount ? $docCount['total'] : 0;
     
     // Comunicazioni
     $comunicazioni = $db->selectOne("
@@ -113,55 +139,28 @@ try {
     error_log("Errore caricamento comunicazioni: " . $e->getMessage());
 }
 
-// Helper functions
-function getTipologiaIcon($tipo) {
-    $icons = [
-        'individuale' => '👤',
-        'srl' => '🏢',
-        'spa' => '🏭',
-        'snc' => '👥',
-        'sas' => '🤝'
-    ];
-    return $icons[$tipo] ?? '🏢';
-}
-
-function getTipologiaLabel($tipo) {
-    $labels = [
-        'individuale' => 'Ditta Individuale',
-        'srl' => 'S.r.l.',
-        'spa' => 'S.p.A.',
-        'snc' => 'S.n.c.',
-        'sas' => 'S.a.s.'
-    ];
-    return $labels[$tipo] ?? $tipo;
-}
-
-function getStatoClass($stato) {
-    $classes = [
-        'attivo' => 'status-active',
-        'sospeso' => 'status-warning',
-        'chiuso' => 'status-inactive'
-    ];
-    return $classes[$stato] ?? '';
-}
-
-function getStatoLabel($stato) {
-    $labels = [
-        'attivo' => '✅ Attivo',
-        'sospeso' => '⚠️ Sospeso',
-        'chiuso' => '🔴 Chiuso'
-    ];
-    return $labels[$stato] ?? $stato;
-}
-
+// Helper per icone tipo comunicazione
 function getTipoComunicazioneIcon($tipo) {
     $icons = [
-        'email' => '📧',
         'telefono' => '📞',
-        'incontro' => '🤝',
+        'email' => '📧',
+        'whatsapp' => '💬',
+        'teams' => '👥',
+        'zoom' => '📹',
+        'presenza' => '🤝',
         'nota' => '📝'
     ];
     return $icons[$tipo] ?? '💬';
+}
+
+// Helper per badge stato
+function getStatoBadgeClass($stato) {
+    $classes = [
+        'attivo' => 'badge-success',
+        'sospeso' => 'badge-warning',
+        'chiuso' => 'badge-danger'
+    ];
+    return $classes[$stato] ?? 'badge-secondary';
 }
 ?>
 <!DOCTYPE html>
@@ -171,24 +170,23 @@ function getTipoComunicazioneIcon($tipo) {
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title><?= $pageTitle ?> - <?= htmlspecialchars($cliente['ragione_sociale']) ?> - CRM Re.De</title>
     
-    <!-- CSS Files -->
+    <!-- CSS nell'ordine corretto -->
     <link rel="stylesheet" href="/crm/assets/css/design-system.css">
-    <link rel="stylesheet" href="/crm/assets/css/datev-optimal.css">
+    <link rel="stylesheet" href="/crm/assets/css/datev-professional.css">
     <link rel="stylesheet" href="/crm/assets/css/clienti.css">
     
     <style>
-        /* Layout ultra-compatto */
-        .cliente-container {
+        /* Layout denso per view */
+        .view-container {
             padding: 1.5rem;
             max-width: 1400px;
             margin: 0 auto;
         }
         
-        /* Header cliente */
         .cliente-header {
             background: white;
             border-radius: 8px;
-            box-shadow: 0 1px 3px rgba(0, 0, 0, 0.05);
+            box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
             padding: 1.5rem;
             margin-bottom: 1.5rem;
         }
@@ -197,157 +195,125 @@ function getTipoComunicazioneIcon($tipo) {
             display: flex;
             justify-content: space-between;
             align-items: flex-start;
-            gap: 1rem;
             margin-bottom: 1rem;
         }
         
-        .cliente-title {
-            display: flex;
-            align-items: center;
-            gap: 1rem;
+        .header-title {
+            flex: 1;
         }
         
-        .cliente-icon {
-            font-size: 2.5rem;
-            line-height: 1;
-        }
-        
-        .cliente-name {
+        .header-title h1 {
             font-size: 1.5rem;
             font-weight: 600;
-            color: var(--gray-900);
-            margin: 0;
+            color: #1f2937;
+            margin: 0 0 0.25rem 0;
         }
         
-        .cliente-id {
-            font-size: 0.875rem;
-            color: var(--gray-600);
-        }
-        
-        .cliente-actions {
+        .cliente-meta {
             display: flex;
-            gap: 0.5rem;
-            align-items: center;
-        }
-        
-        .btn-action {
-            padding: 0.5rem 1rem;
-            font-size: 0.875rem;
-            border-radius: 6px;
-            text-decoration: none;
-            display: inline-flex;
-            align-items: center;
-            gap: 0.5rem;
-            transition: all 0.2s;
-        }
-        
-        .btn-action.primary {
-            background: var(--primary-green);
-            color: white;
-        }
-        
-        .btn-action.primary:hover {
-            background: var(--primary-green-hover);
-        }
-        
-        /* Stats cards */
-        .stats-grid {
-            display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
             gap: 1rem;
-            margin-bottom: 1.5rem;
+            font-size: 0.875rem;
+            color: #6b7280;
         }
         
-        .stat-card {
-            background: white;
-            padding: 1rem;
-            border-radius: 6px;
-            box-shadow: 0 1px 3px rgba(0, 0, 0, 0.05);
-            text-align: center;
+        .header-actions {
+            display: flex;
+            gap: 0.75rem;
         }
         
-        .stat-icon {
-            font-size: 2rem;
-            margin-bottom: 0.5rem;
-        }
-        
-        .stat-value {
-            font-size: 1.75rem;
-            font-weight: 600;
-            color: var(--gray-900);
-            margin: 0;
-        }
-        
-        .stat-label {
-            font-size: 0.813rem;
-            color: var(--gray-600);
-            text-transform: uppercase;
-            letter-spacing: 0.025em;
-        }
-        
-        /* Info sections */
         .info-grid {
             display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+            grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
             gap: 1.5rem;
-            margin-bottom: 1.5rem;
+            margin-top: 1rem;
         }
         
-        .info-section {
-            background: white;
-            border-radius: 8px;
-            box-shadow: 0 1px 3px rgba(0, 0, 0, 0.05);
-            overflow: hidden;
-        }
-        
-        .section-header {
-            padding: 1rem 1.25rem;
-            background: var(--gray-50);
-            border-bottom: 1px solid var(--gray-200);
-            font-weight: 600;
-            color: var(--gray-800);
-            display: flex;
-            align-items: center;
-            gap: 0.5rem;
-        }
-        
-        .section-content {
-            padding: 1.25rem;
-        }
-        
-        .info-row {
-            display: flex;
-            justify-content: space-between;
-            padding: 0.5rem 0;
-            border-bottom: 1px solid var(--gray-100);
-        }
-        
-        .info-row:last-child {
-            border-bottom: none;
+        .info-group {
+            border-left: 3px solid #e5e7eb;
+            padding-left: 1rem;
         }
         
         .info-label {
-            font-size: 0.813rem;
-            color: var(--gray-600);
+            font-size: 0.75rem;
+            font-weight: 500;
+            color: #6b7280;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+            margin-bottom: 0.25rem;
         }
         
         .info-value {
             font-size: 0.875rem;
-            color: var(--gray-900);
+            color: #1f2937;
             font-weight: 500;
-            text-align: right;
         }
         
-        /* Timeline comunicazioni */
-        .timeline {
+        .info-value.empty {
+            color: #9ca3af;
+            font-style: italic;
+        }
+        
+        .content-grid {
+            display: grid;
+            grid-template-columns: 2fr 1fr;
+            gap: 1.5rem;
+        }
+        
+        .section-card {
+            background: white;
+            border-radius: 8px;
+            box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+            padding: 1.25rem;
+        }
+        
+        .section-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 1rem;
+            padding-bottom: 0.75rem;
+            border-bottom: 1px solid #e5e7eb;
+        }
+        
+        .section-title {
+            font-size: 1rem;
+            font-weight: 600;
+            color: #1f2937;
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+        }
+        
+        .stats-grid {
+            display: grid;
+            grid-template-columns: repeat(2, 1fr);
+            gap: 1rem;
+        }
+        
+        .stat-card {
+            background: #f9fafb;
+            border-radius: 6px;
             padding: 1rem;
+            text-align: center;
+        }
+        
+        .stat-value {
+            font-size: 1.5rem;
+            font-weight: 600;
+            color: #1f2937;
+        }
+        
+        .stat-label {
+            font-size: 0.75rem;
+            color: #6b7280;
+            margin-top: 0.25rem;
         }
         
         .timeline-item {
             display: flex;
-            gap: 1rem;
+            gap: 0.75rem;
             padding: 0.75rem 0;
-            border-bottom: 1px solid var(--gray-100);
+            border-bottom: 1px solid #f3f4f6;
         }
         
         .timeline-item:last-child {
@@ -355,7 +321,13 @@ function getTipoComunicazioneIcon($tipo) {
         }
         
         .timeline-icon {
-            font-size: 1.25rem;
+            width: 32px;
+            height: 32px;
+            background: #f3f4f6;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
             flex-shrink: 0;
         }
         
@@ -365,46 +337,81 @@ function getTipoComunicazioneIcon($tipo) {
         }
         
         .timeline-title {
-            font-weight: 500;
-            color: var(--gray-900);
             font-size: 0.875rem;
-            margin-bottom: 0.25rem;
+            font-weight: 500;
+            color: #1f2937;
+            margin-bottom: 0.125rem;
         }
         
         .timeline-meta {
             font-size: 0.75rem;
-            color: var(--gray-600);
+            color: #6b7280;
+        }
+        
+        .badge {
+            display: inline-flex;
+            align-items: center;
+            padding: 0.25rem 0.75rem;
+            font-size: 0.75rem;
+            font-weight: 500;
+            border-radius: 9999px;
+        }
+        
+        .badge-success {
+            background-color: #d1fae5;
+            color: #065f46;
+        }
+        
+        .badge-warning {
+            background-color: #fed7aa;
+            color: #92400e;
+        }
+        
+        .badge-danger {
+            background-color: #fee2e2;
+            color: #991b1b;
+        }
+        
+        .note-section {
+            background: #f9fafb;
+            border-radius: 6px;
+            padding: 1rem;
+            margin-top: 1rem;
+        }
+        
+        .note-content {
+            font-size: 0.875rem;
+            color: #4b5563;
+            line-height: 1.5;
+            white-space: pre-wrap;
         }
         
         .empty-state {
             text-align: center;
-            padding: 2rem;
-            color: var(--gray-600);
-        }
-        
-        .empty-state-icon {
-            font-size: 2.5rem;
-            margin-bottom: 0.5rem;
+            padding: 2rem 1rem;
+            color: #9ca3af;
+            font-size: 0.875rem;
         }
         
         @media (max-width: 768px) {
+            .content-grid {
+                grid-template-columns: 1fr;
+            }
+            
             .header-top {
                 flex-direction: column;
+                gap: 1rem;
             }
             
-            .cliente-actions {
+            .header-actions {
                 width: 100%;
                 justify-content: flex-start;
-            }
-            
-            .info-grid {
-                grid-template-columns: 1fr;
             }
         }
     </style>
 </head>
-<body class="datev-compact">
-    <div class="app-layout">
+<body class="datev-body">
+    <div class="datev-container">
         <!-- ✅ COMPONENTE SIDEBAR (OBBLIGATORIO) -->
         <?php include $_SERVER['DOCUMENT_ROOT'] . '/crm/components/navigation.php'; ?>
         
@@ -413,243 +420,142 @@ function getTipoComunicazioneIcon($tipo) {
             <?php include $_SERVER['DOCUMENT_ROOT'] . '/crm/components/header.php'; ?>
             
             <main class="main-content">
-                <div class="cliente-container">
-                    <!-- Messaggi -->
-                    <?php if ($error_message): ?>
-                        <div class="alert alert-danger"><?= htmlspecialchars($error_message) ?></div>
-                    <?php endif; ?>
-                    
-                    <?php if ($success_message): ?>
-                        <div class="alert alert-success"><?= htmlspecialchars($success_message) ?></div>
-                    <?php endif; ?>
-                    
+                <div class="view-container">
                     <!-- Header Cliente -->
                     <div class="cliente-header">
                         <div class="header-top">
-                            <div class="cliente-title">
-                                <div class="cliente-icon">
-                                    <?= getTipologiaIcon($cliente['tipologia_azienda']) ?>
-                                </div>
-                                <div>
-                                    <h1 class="cliente-name"><?= htmlspecialchars($cliente['ragione_sociale']) ?></h1>
-                                    <div class="cliente-id">
-                                        ID: #<?= str_pad($cliente['id'], 6, '0', STR_PAD_LEFT) ?> 
-                                        • <?= getTipologiaLabel($cliente['tipologia_azienda']) ?>
-                                    </div>
+                            <div class="header-title">
+                                <h1><?= htmlspecialchars($cliente['ragione_sociale']) ?></h1>
+                                <div class="cliente-meta">
+                                    <span>ID: #<?= str_pad($clienteId, 6, '0', STR_PAD_LEFT) ?></span>
+                                    <span>•</span>
+                                    <span class="badge <?= getStatoBadgeClass($cliente['stato']) ?>">
+                                        <?= ucfirst($cliente['stato']) ?>
+                                    </span>
+                                    <span>•</span>
+                                    <span>Cliente dal <?= date('d/m/Y', strtotime($cliente['created_at'])) ?></span>
                                 </div>
                             </div>
-                            <div class="cliente-actions">
-                                <span class="status-badge <?= getStatoClass($cliente['stato']) ?>">
-                                    <?= getStatoLabel($cliente['stato']) ?>
-                                </span>
+                            
+                            <div class="header-actions">
                                 <?php if ($sessionInfo['is_admin'] || $cliente['operatore_responsabile_id'] == $sessionInfo['operatore_id']): ?>
-                                    <a href="/crm/?action=clienti&view=edit&id=<?= $clienteId ?>" class="btn-action primary">
-                                        ✏️ Modifica
+                                    <a href="/crm/?action=clienti&view=edit&id=<?= $clienteId ?>" class="btn btn-primary">
+                                        <span>✏️ Modifica</span>
                                     </a>
                                 <?php endif; ?>
-                                <a href="/crm/?action=clienti&view=documenti&id=<?= $clienteId ?>" class="btn-action btn-secondary">
-                                    📁 Documenti
+                                <a href="/crm/?action=clienti" class="btn btn-secondary">
+                                    <span>← Torna alla lista</span>
                                 </a>
-                                <a href="/crm/?action=clienti&view=comunicazioni&id=<?= $clienteId ?>" class="btn-action btn-secondary">
-                                    💬 Comunicazioni
-                                </a>
-                            </div>
-                        </div>
-                    </div>
-                    
-                    <!-- Statistiche -->
-                    <div class="stats-grid">
-                        <div class="stat-card">
-                            <div class="stat-icon">📋</div>
-                            <div class="stat-value"><?= $stats['pratiche_attive'] ?></div>
-                            <div class="stat-label">Pratiche Attive</div>
-                        </div>
-                        <div class="stat-card">
-                            <div class="stat-icon">📁</div>
-                            <div class="stat-value"><?= $stats['documenti_totali'] ?></div>
-                            <div class="stat-label">Documenti</div>
-                        </div>
-                        <div class="stat-card">
-                            <div class="stat-icon">💬</div>
-                            <div class="stat-value"><?= $stats['comunicazioni_totali'] ?></div>
-                            <div class="stat-label">Comunicazioni</div>
-                        </div>
-                        <div class="stat-card">
-                            <div class="stat-icon">📅</div>
-                            <div class="stat-value">
-                                <?php if ($stats['ultima_comunicazione']): ?>
-                                    <?= date('d/m', strtotime($stats['ultima_comunicazione'])) ?>
-                                <?php else: ?>
-                                    -
-                                <?php endif; ?>
-                            </div>
-                            <div class="stat-label">Ultimo Contatto</div>
-                        </div>
-                    </div>
-                    
-                    <!-- Info sections -->
-                    <div class="info-grid">
-                        <!-- Dati fiscali -->
-                        <div class="info-section">
-                            <div class="section-header">
-                                <span>🧾</span>
-                                <span>Dati Fiscali</span>
-                            </div>
-                            <div class="section-content">
-                                <?php if ($cliente['codice_fiscale']): ?>
-                                <div class="info-row">
-                                    <span class="info-label">Codice Fiscale</span>
-                                    <span class="info-value"><?= htmlspecialchars($cliente['codice_fiscale']) ?></span>
-                                </div>
-                                <?php endif; ?>
-                                
-                                <?php if ($cliente['partita_iva']): ?>
-                                <div class="info-row">
-                                    <span class="info-label">Partita IVA</span>
-                                    <span class="info-value"><?= htmlspecialchars($cliente['partita_iva']) ?></span>
-                                </div>
-                                <?php endif; ?>
-                                
-                                <?php if ($cliente['codice_univoco']): ?>
-                                <div class="info-row">
-                                    <span class="info-label">Codice SDI</span>
-                                    <span class="info-value"><?= htmlspecialchars($cliente['codice_univoco']) ?></span>
-                                </div>
-                                <?php endif; ?>
-                                
-                                <?php if (!$cliente['codice_fiscale'] && !$cliente['partita_iva'] && !$cliente['codice_univoco']): ?>
-                                <div class="empty-state">
-                                    <div class="empty-state-icon">📋</div>
-                                    <p>Nessun dato fiscale inserito</p>
-                                </div>
-                                <?php endif; ?>
                             </div>
                         </div>
                         
-                        <!-- Recapiti -->
-                        <div class="info-section">
-                            <div class="section-header">
-                                <span>📍</span>
-                                <span>Recapiti</span>
+                        <div class="info-grid">
+                            <!-- Dati Fiscali -->
+                            <div class="info-group">
+                                <div class="info-label">Dati Fiscali</div>
+                                <?php if ($cliente['codice_fiscale']): ?>
+                                    <div class="info-value">C.F.: <?= htmlspecialchars($cliente['codice_fiscale']) ?></div>
+                                <?php endif; ?>
+                                <?php if ($cliente['partita_iva']): ?>
+                                    <div class="info-value">P.IVA: <?= htmlspecialchars($cliente['partita_iva']) ?></div>
+                                <?php endif; ?>
+                                <?php if ($cliente['regime_fiscale']): ?>
+                                    <div class="info-value">Regime: <?= formatRegimeFiscale($cliente['regime_fiscale']) ?></div>
+                                <?php endif; ?>
+                                <?php if ($cliente['liquidazione_iva']): ?>
+                                    <div class="info-value">IVA: <?= formatLiquidazioneIva($cliente['liquidazione_iva']) ?></div>
+                                <?php endif; ?>
+                                <?php if (!$cliente['codice_fiscale'] && !$cliente['partita_iva'] && !$cliente['regime_fiscale'] && !$cliente['liquidazione_iva']): ?>
+                                    <div class="info-value empty">Dati fiscali non inseriti</div>
+                                <?php endif; ?>
                             </div>
-                            <div class="section-content">
+                            
+                            <!-- Contatti -->
+                            <div class="info-group">
+                                <div class="info-label">Contatti</div>
+                                <?php if ($cliente['telefono']): ?>
+                                    <div class="info-value">📞 <?= htmlspecialchars($cliente['telefono']) ?></div>
+                                <?php endif; ?>
+                                <?php if ($cliente['email']): ?>
+                                    <div class="info-value">📧 <?= htmlspecialchars($cliente['email']) ?></div>
+                                <?php endif; ?>
+                                <?php if ($cliente['pec']): ?>
+                                    <div class="info-value">📮 <?= htmlspecialchars($cliente['pec']) ?></div>
+                                <?php endif; ?>
+                                <?php if (!$cliente['telefono'] && !$cliente['email'] && !$cliente['pec']): ?>
+                                    <div class="info-value empty">Nessun contatto inserito</div>
+                                <?php endif; ?>
+                            </div>
+                            
+                            <!-- Sede -->
+                            <div class="info-group">
+                                <div class="info-label">Sede Legale</div>
                                 <?php if ($cliente['indirizzo'] || $cliente['citta']): ?>
-                                <div class="info-row">
-                                    <span class="info-label">Indirizzo</span>
-                                    <span class="info-value">
+                                    <div class="info-value">
                                         <?= htmlspecialchars($cliente['indirizzo']) ?>
-                                        <?php if ($cliente['cap'] || $cliente['citta']): ?>
-                                            <br><?= htmlspecialchars($cliente['cap']) ?> <?= htmlspecialchars($cliente['citta']) ?>
+                                        <?php if ($cliente['citta']): ?>
+                                            <br><?= htmlspecialchars($cliente['cap']) ?> <?= htmlspecialchars($cliente['citta']) ?> 
                                             <?php if ($cliente['provincia']): ?>(<?= htmlspecialchars($cliente['provincia']) ?>)<?php endif; ?>
                                         <?php endif; ?>
-                                    </span>
-                                </div>
-                                <?php endif; ?>
-                                
-                                <?php if ($cliente['telefono']): ?>
-                                <div class="info-row">
-                                    <span class="info-label">Telefono</span>
-                                    <span class="info-value">
-                                        <a href="tel:<?= htmlspecialchars($cliente['telefono']) ?>" style="color: inherit; text-decoration: none;">
-                                            <?= htmlspecialchars($cliente['telefono']) ?>
-                                        </a>
-                                    </span>
-                                </div>
-                                <?php endif; ?>
-                                
-                                <?php if ($cliente['email']): ?>
-                                <div class="info-row">
-                                    <span class="info-label">Email</span>
-                                    <span class="info-value">
-                                        <a href="mailto:<?= htmlspecialchars($cliente['email']) ?>" style="color: inherit; text-decoration: none;">
-                                            <?= htmlspecialchars($cliente['email']) ?>
-                                        </a>
-                                    </span>
-                                </div>
-                                <?php endif; ?>
-                                
-                                <?php if ($cliente['pec']): ?>
-                                <div class="info-row">
-                                    <span class="info-label">PEC</span>
-                                    <span class="info-value">
-                                        <a href="mailto:<?= htmlspecialchars($cliente['pec']) ?>" style="color: inherit; text-decoration: none;">
-                                            <?= htmlspecialchars($cliente['pec']) ?>
-                                        </a>
-                                    </span>
-                                </div>
-                                <?php endif; ?>
-                                
-                                <?php if (!$cliente['indirizzo'] && !$cliente['telefono'] && !$cliente['email'] && !$cliente['pec']): ?>
-                                <div class="empty-state">
-                                    <div class="empty-state-icon">📍</div>
-                                    <p>Nessun recapito inserito</p>
-                                </div>
+                                    </div>
+                                <?php else: ?>
+                                    <div class="info-value empty">Indirizzo non inserito</div>
                                 <?php endif; ?>
                             </div>
-                        </div>
-                        
-                        <!-- Info gestionali -->
-                        <div class="info-section">
-                            <div class="section-header">
-                                <span>⚙️</span>
-                                <span>Informazioni Gestionali</span>
-                            </div>
-                            <div class="section-content">
-                                <div class="info-row">
-                                    <span class="info-label">Operatore Responsabile</span>
-                                    <span class="info-value"><?= htmlspecialchars($cliente['operatore_nome'] ?? 'Non assegnato') ?></span>
+                            
+                            <!-- Operatore -->
+                            <div class="info-group">
+                                <div class="info-label">Operatore Responsabile</div>
+                                <div class="info-value">
+                                    👤 <?= htmlspecialchars($cliente['operatore_nome']) ?>
                                 </div>
-                                
-                                <div class="info-row">
-                                    <span class="info-label">Cliente dal</span>
-                                    <span class="info-value"><?= date('d/m/Y', strtotime($cliente['created_at'])) ?></span>
-                                </div>
-                                
-                                <?php if ($cliente['updated_at']): ?>
-                                <div class="info-row">
-                                    <span class="info-label">Ultima modifica</span>
-                                    <span class="info-value"><?= date('d/m/Y H:i', strtotime($cliente['updated_at'])) ?></span>
-                                </div>
-                                <?php endif; ?>
                             </div>
                         </div>
                     </div>
                     
-                    <!-- Note -->
-                    <?php if ($cliente['note']): ?>
-                    <div class="info-section" style="margin-bottom: 1.5rem;">
-                        <div class="section-header">
-                            <span>📝</span>
-                            <span>Note</span>
-                        </div>
-                        <div class="section-content">
-                            <p style="margin: 0; white-space: pre-wrap;"><?= htmlspecialchars($cliente['note']) ?></p>
-                        </div>
-                    </div>
-                    <?php endif; ?>
-                    
-                    <!-- Ultime comunicazioni -->
-                    <div class="info-section">
-                        <div class="section-header">
-                            <span>💬</span>
-                            <span>Ultime Comunicazioni</span>
-                            <a href="/crm/?action=clienti&view=comunicazioni&id=<?= $clienteId ?>" 
-                               style="margin-left: auto; font-size: 0.875rem; color: var(--primary-green); text-decoration: none;">
-                                Vedi tutte →
-                            </a>
-                        </div>
-                        <div class="timeline">
-                            <?php if (empty($ultimeComunicazioni)): ?>
-                                <div class="empty-state">
-                                    <div class="empty-state-icon">💬</div>
-                                    <p>Nessuna comunicazione registrata</p>
-                                    <a href="/crm/?action=clienti&view=comunicazioni&id=<?= $clienteId ?>" 
-                                       class="btn btn-primary" style="margin-top: 1rem;">
-                                        Aggiungi comunicazione
+                    <!-- Content Grid -->
+                    <div class="content-grid">
+                        <!-- Colonna principale -->
+                        <div>
+                            <!-- Note Cliente -->
+                            <?php if ($cliente['note'] || $cliente['note_generali']): ?>
+                            <div class="section-card">
+                                <div class="section-header">
+                                    <h2 class="section-title">
+                                        <span>📝</span>
+                                        <span>Note Aggiuntive</span>
+                                    </h2>
+                                </div>
+                                
+                                <?php if ($cliente['note']): ?>
+                                <div class="note-section">
+                                    <div class="note-content"><?= nl2br(htmlspecialchars($cliente['note'])) ?></div>
+                                </div>
+                                <?php endif; ?>
+                                
+                                <?php if ($cliente['note_generali']): ?>
+                                <div class="note-section" style="margin-top: 1rem;">
+                                    <div class="info-label">Note Generali</div>
+                                    <div class="note-content"><?= nl2br(htmlspecialchars($cliente['note_generali'])) ?></div>
+                                </div>
+                                <?php endif; ?>
+                            </div>
+                            <?php endif; ?>
+                            
+                            <!-- Timeline Comunicazioni -->
+                            <div class="section-card" style="margin-top: 1.5rem;">
+                                <div class="section-header">
+                                    <h2 class="section-title">
+                                        <span>💬</span>
+                                        <span>Ultime Comunicazioni</span>
+                                    </h2>
+                                    <a href="/crm/?action=clienti&view=comunicazioni&id=<?= $clienteId ?>" class="btn btn-sm btn-outline">
+                                        Vedi tutte
                                     </a>
                                 </div>
-                            <?php else: ?>
-                                <?php foreach ($ultimeComunicazioni as $com): ?>
+                                
+                                <?php if (!empty($ultimeComunicazioni)): ?>
+                                    <?php foreach ($ultimeComunicazioni as $com): ?>
                                     <div class="timeline-item">
                                         <div class="timeline-icon">
                                             <?= getTipoComunicazioneIcon($com['tipo']) ?>
@@ -664,8 +570,73 @@ function getTipoComunicazioneIcon($tipo) {
                                             </div>
                                         </div>
                                     </div>
-                                <?php endforeach; ?>
-                            <?php endif; ?>
+                                    <?php endforeach; ?>
+                                <?php else: ?>
+                                    <div class="empty-state">
+                                        <p>Nessuna comunicazione registrata</p>
+                                    </div>
+                                <?php endif; ?>
+                            </div>
+                        </div>
+                        
+                        <!-- Sidebar -->
+                        <div>
+                            <!-- Statistiche -->
+                            <div class="section-card">
+                                <div class="section-header">
+                                    <h2 class="section-title">
+                                        <span>📊</span>
+                                        <span>Statistiche</span>
+                                    </h2>
+                                </div>
+                                
+                                <div class="stats-grid">
+                                    <div class="stat-card">
+                                        <div class="stat-value"><?= $stats['pratiche_attive'] ?></div>
+                                        <div class="stat-label">Pratiche Attive</div>
+                                    </div>
+                                    <div class="stat-card">
+                                        <div class="stat-value"><?= $stats['documenti_totali'] ?></div>
+                                        <div class="stat-label">Documenti</div>
+                                    </div>
+                                    <div class="stat-card">
+                                        <div class="stat-value"><?= $stats['comunicazioni_totali'] ?></div>
+                                        <div class="stat-label">Comunicazioni</div>
+                                    </div>
+                                    <div class="stat-card">
+                                        <div class="stat-value">
+                                            <?php if ($stats['ultima_comunicazione']): ?>
+                                                <?= date('d/m', strtotime($stats['ultima_comunicazione'])) ?>
+                                            <?php else: ?>
+                                                -
+                                            <?php endif; ?>
+                                        </div>
+                                        <div class="stat-label">Ultimo Contatto</div>
+                                    </div>
+                                </div>
+                            </div>
+                            
+                            <!-- Azioni Rapide -->
+                            <div class="section-card" style="margin-top: 1.5rem;">
+                                <div class="section-header">
+                                    <h2 class="section-title">
+                                        <span>⚡</span>
+                                        <span>Azioni Rapide</span>
+                                    </h2>
+                                </div>
+                                
+                                <div style="display: flex; flex-direction: column; gap: 0.5rem;">
+                                    <a href="/crm/?action=clienti&view=documenti&id=<?= $clienteId ?>" class="btn btn-block btn-outline">
+                                        <span>📁 Gestione Documenti</span>
+                                    </a>
+                                    <a href="/crm/?action=clienti&view=comunicazioni&id=<?= $clienteId ?>" class="btn btn-block btn-outline">
+                                        <span>💬 Nuova Comunicazione</span>
+                                    </a>
+                                    <a href="/crm/?action=pratiche&view=create&cliente_id=<?= $clienteId ?>" class="btn btn-block btn-outline">
+                                        <span>📋 Nuova Pratica</span>
+                                    </a>
+                                </div>
+                            </div>
                         </div>
                     </div>
                 </div>

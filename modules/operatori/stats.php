@@ -2,7 +2,9 @@
 /**
  * modules/operatori/stats.php - Statistiche Team CRM Re.De Consulting
  * 
- * ✅ VERSIONE AGGIORNATA CON ROUTER
+ * ✅ VERSIONE AGGIORNATA CON COMPONENTI CENTRALIZZATI
+ * ✅ SIDEBAR E HEADER INCLUSI COME DA ARCHITETTURA
+ * ✅ DESIGN DATEV PROFESSIONAL ULTRA-COMPRESSO
  */
 
 // Verifica che siamo passati dal router
@@ -10,6 +12,10 @@ if (!defined('OPERATORI_ROUTER_LOADED')) {
     header('Location: /crm/?action=operatori');
     exit;
 }
+
+// Variabili per i componenti (OBBLIGATORIE)
+$pageTitle = 'Statistiche Team';
+$pageIcon = '📊';
 
 // Verifica permessi admin (doppio controllo)
 if (!$sessionInfo['is_admin']) {
@@ -59,83 +65,79 @@ try {
         WHERE DATE(login_timestamp) >= DATE_SUB(CURDATE(), INTERVAL {$periodo} DAY)
     ") ?: ['sessioni_totali' => 0, 'operatori_con_sessioni' => 0, 'ore_totali' => 0, 'media_ore_sessione' => 0];
 
-    // Top operatori per ore lavorate
-    $topOperatoriOre = $db->select("
+    // Top 5 operatori per ore lavorate
+    $topOperatori = $db->select("
         SELECT 
             o.id,
             o.nome,
             o.cognome,
-            o.codice_operatore,
-            COUNT(sl.id) as sessioni,
+            COUNT(s.id) as sessioni,
             COALESCE(SUM(
                 CASE 
-                    WHEN sl.logout_timestamp IS NOT NULL 
-                    THEN TIMESTAMPDIFF(MINUTE, sl.login_timestamp, sl.logout_timestamp) / 60.0
+                    WHEN s.logout_timestamp IS NOT NULL 
+                    THEN TIMESTAMPDIFF(MINUTE, s.login_timestamp, s.logout_timestamp) / 60.0
                     ELSE 0
                 END
-            ), 0) as ore_totali,
-            COALESCE(AVG(
-                CASE 
-                    WHEN sl.logout_timestamp IS NOT NULL 
-                    THEN TIMESTAMPDIFF(MINUTE, sl.login_timestamp, sl.logout_timestamp) / 60.0
-                    ELSE NULL
-                END
-            ), 0) as media_ore_sessione
+            ), 0) as ore_totali
         FROM operatori o
-        LEFT JOIN sessioni_lavoro sl ON o.id = sl.operatore_id 
-            AND DATE(sl.login_timestamp) >= DATE_SUB(CURDATE(), INTERVAL {$periodo} DAY)
+        LEFT JOIN sessioni_lavoro s ON o.id = s.operatore_id 
+            AND DATE(s.login_timestamp) >= DATE_SUB(CURDATE(), INTERVAL {$periodo} DAY)
         WHERE o.is_attivo = 1
         GROUP BY o.id
         ORDER BY ore_totali DESC
-        LIMIT 10
+        LIMIT 5
     ");
 
-    // Statistiche per giorno della settimana
-    $statsByDayOfWeek = $db->select("
+    // Distribuzione ore per giorno della settimana
+    $orePerGiorno = $db->select("
         SELECT 
-            DAYNAME(login_timestamp) as giorno,
-            DAYOFWEEK(login_timestamp) as giorno_numero,
+            DAYOFWEEK(login_timestamp) as giorno_settimana,
+            DAYNAME(login_timestamp) as nome_giorno,
             COUNT(*) as sessioni,
-            COUNT(DISTINCT operatore_id) as operatori_unici,
-            COALESCE(AVG(
+            COALESCE(SUM(
                 CASE 
                     WHEN logout_timestamp IS NOT NULL 
                     THEN TIMESTAMPDIFF(MINUTE, login_timestamp, logout_timestamp) / 60.0
-                    ELSE NULL
+                    ELSE 0
                 END
-            ), 0) as media_ore
+            ), 0) as ore_totali
         FROM sessioni_lavoro
         WHERE DATE(login_timestamp) >= DATE_SUB(CURDATE(), INTERVAL {$periodo} DAY)
         GROUP BY DAYOFWEEK(login_timestamp)
         ORDER BY DAYOFWEEK(login_timestamp)
     ");
 
-    // Statistiche per fascia oraria
-    $statsByHour = $db->select("
+    // Trend settimanale ore lavorate
+    $trendSettimanale = $db->select("
         SELECT 
-            HOUR(login_timestamp) as ora,
+            YEARWEEK(login_timestamp) as settimana,
+            MIN(DATE(login_timestamp)) as inizio_settimana,
+            COUNT(DISTINCT operatore_id) as operatori_attivi,
             COUNT(*) as sessioni,
-            COUNT(DISTINCT operatore_id) as operatori_unici
+            COALESCE(SUM(
+                CASE 
+                    WHEN logout_timestamp IS NOT NULL 
+                    THEN TIMESTAMPDIFF(MINUTE, login_timestamp, logout_timestamp) / 60.0
+                    ELSE 0
+                END
+            ), 0) as ore_totali
         FROM sessioni_lavoro
         WHERE DATE(login_timestamp) >= DATE_SUB(CURDATE(), INTERVAL {$periodo} DAY)
-        GROUP BY HOUR(login_timestamp)
-        ORDER BY HOUR(login_timestamp)
+        GROUP BY YEARWEEK(login_timestamp)
+        ORDER BY settimana DESC
+        LIMIT 12
     ");
 
-    // Statistiche clienti per operatore
-    $statsClienti = $db->select("
-        SELECT 
-            o.id,
-            o.nome,
-            o.cognome,
-            COUNT(c.id) as clienti_totali,
-            COUNT(CASE WHEN c.is_attivo = 1 THEN 1 END) as clienti_attivi
+    // Operatori senza sessioni nel periodo
+    $operatoriInattivi = $db->select("
+        SELECT o.id, o.nome, o.cognome, o.email
         FROM operatori o
-        LEFT JOIN clienti c ON o.id = c.operatore_responsabile_id
         WHERE o.is_attivo = 1
-        GROUP BY o.id
-        HAVING clienti_totali > 0
-        ORDER BY clienti_totali DESC
+        AND o.id NOT IN (
+            SELECT DISTINCT operatore_id 
+            FROM sessioni_lavoro 
+            WHERE DATE(login_timestamp) >= DATE_SUB(CURDATE(), INTERVAL {$periodo} DAY)
+        )
     ");
 
     // Calcolo produttività media
@@ -149,14 +151,14 @@ try {
     // Inizializza con valori vuoti in caso di errore
     $statsGenerali = ['totale_operatori' => 0, 'operatori_attivi' => 0, 'amministratori' => 0, 'nuovi_operatori' => 0];
     $statsSessioni = ['sessioni_totali' => 0, 'operatori_con_sessioni' => 0, 'ore_totali' => 0, 'media_ore_sessione' => 0];
-    $topOperatoriOre = [];
-    $statsByDayOfWeek = [];
-    $statsByHour = [];
-    $statsClienti = [];
+    $topOperatori = [];
+    $orePerGiorno = [];
+    $trendSettimanale = [];
+    $operatoriInattivi = [];
     $produttivitaMedia = 0;
 }
 
-// Funzioni helper
+// Helper functions
 function formatHours($hours) {
     return number_format($hours, 1) . 'h';
 }
@@ -176,18 +178,10 @@ $giorniItaliano = [
     'Sunday' => 'Domenica'
 ];
 
-foreach ($statsByDayOfWeek as $day) {
+foreach ($orePerGiorno as $day) {
     $chartDataDays[] = [
-        'giorno' => $giorniItaliano[$day['giorno']] ?? $day['giorno'],
-        'sessioni' => $day['sessioni'],
-        'ore_medie' => round($day['media_ore'], 1)
-    ];
-}
-
-foreach ($statsByHour as $hour) {
-    $chartDataHours[] = [
-        'ora' => sprintf('%02d:00', $hour['ora']),
-        'sessioni' => $hour['sessioni']
+        'giorno' => $giorniItaliano[$day['nome_giorno']] ?? $day['nome_giorno'],
+        'ore' => round($day['ore_totali'], 1)
     ];
 }
 ?>
@@ -196,46 +190,14 @@ foreach ($statsByHour as $hour) {
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Statistiche Team - CRM Re.De Consulting</title>
+    <title><?= $pageTitle ?> - CRM Re.De</title>
+    
+    <!-- CSS nell'ordine corretto -->
+    <link rel="stylesheet" href="/crm/assets/css/design-system.css">
+    <link rel="stylesheet" href="/crm/assets/css/datev-professional.css">
+    <link rel="stylesheet" href="/crm/assets/css/operatori.css">
     
     <style>
-        :root {
-            --primary-blue: #194F8B;
-            --secondary-green: #97BC5B;
-            --accent-orange: #FF7F41;
-            --gray-50: #f9fafb;
-            --gray-100: #f3f4f6;
-            --gray-200: #e5e7eb;
-            --gray-300: #d1d5db;
-            --gray-400: #9ca3af;
-            --gray-500: #6b7280;
-            --gray-600: #4b5563;
-            --gray-700: #374151;
-            --gray-800: #1f2937;
-            --gray-900: #111827;
-            --success-green: #22c55e;
-            --warning-yellow: #f59e0b;
-            --danger-red: #ef4444;
-            --radius-sm: 0.25rem;
-            --radius-md: 0.375rem;
-            --radius-lg: 0.5rem;
-            --transition-fast: 150ms ease;
-        }
-        
-        * {
-            box-sizing: border-box;
-            margin: 0;
-            padding: 0;
-        }
-        
-        body {
-            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
-            background: var(--gray-50);
-            color: var(--gray-900);
-            font-size: 0.875rem;
-            line-height: 1.5;
-        }
-        
         /* Container principale */
         .stats-container {
             max-width: 1400px;
@@ -243,117 +205,65 @@ foreach ($statsByHour as $hour) {
             padding: 1rem;
         }
         
-        /* Breadcrumb */
-        .breadcrumb {
-            display: flex;
-            align-items: center;
-            gap: 0.5rem;
-            padding: 0.5rem 0;
-            font-size: 0.875rem;
-            color: var(--gray-600);
-        }
-        
-        .breadcrumb a {
-            color: var(--primary-blue);
-            text-decoration: none;
-        }
-        
-        .breadcrumb a:hover {
-            text-decoration: underline;
-        }
-        
-        /* Header */
-        .main-header {
-            background: white;
-            border-radius: var(--radius-lg);
-            padding: 1rem 1.5rem;
-            margin-bottom: 1.5rem;
-            box-shadow: 0 1px 3px rgba(0, 0, 0, 0.05);
+        /* Header pagina */
+        .page-header {
             display: flex;
             justify-content: space-between;
             align-items: center;
+            margin-bottom: 1.5rem;
+            padding-bottom: 1rem;
+            border-bottom: 2px solid var(--gray-200);
         }
         
         .header-left h1 {
-            font-size: 1.25rem;
-            font-weight: 600;
-            color: var(--gray-800);
-            margin-bottom: 0.25rem;
+            font-size: 1.5rem;
+            color: var(--gray-900);
+            margin: 0;
         }
         
         .header-left p {
             color: var(--gray-600);
+            margin: 0.25rem 0 0 0;
             font-size: 0.875rem;
         }
         
         .header-actions {
             display: flex;
-            gap: 0.5rem;
-        }
-        
-        /* Bottoni */
-        .btn {
-            padding: 0.5rem 1rem;
-            border-radius: var(--radius-md);
-            font-size: 0.875rem;
-            font-weight: 500;
-            text-decoration: none;
-            display: inline-flex;
-            align-items: center;
-            gap: 0.375rem;
-            transition: all var(--transition-fast);
-            border: 1px solid transparent;
-            cursor: pointer;
-            background: white;
-        }
-        
-        .btn-secondary {
-            background: white;
-            color: var(--gray-700);
-            border-color: var(--gray-300);
-        }
-        
-        .btn-secondary:hover {
-            background: var(--gray-50);
-            border-color: var(--gray-400);
-        }
-        
-        .btn-outline {
-            background: transparent;
-            color: var(--gray-700);
-            border-color: var(--gray-300);
-        }
-        
-        .btn-outline:hover {
-            background: var(--gray-50);
+            gap: 0.75rem;
         }
         
         /* Period Selector */
         .period-selector {
             background: white;
-            border-radius: var(--radius-lg);
-            padding: 0.75rem;
+            border-radius: var(--border-radius-lg);
+            padding: 1rem;
             margin-bottom: 1.5rem;
-            box-shadow: 0 1px 3px rgba(0, 0, 0, 0.05);
+            box-shadow: var(--shadow-sm);
             display: flex;
-            gap: 0.5rem;
             align-items: center;
+            gap: 1rem;
         }
         
         .period-selector label {
-            font-weight: 500;
+            font-weight: 600;
             color: var(--gray-700);
+            font-size: 0.875rem;
+        }
+        
+        .period-buttons {
+            display: flex;
+            gap: 0.5rem;
         }
         
         .period-button {
             padding: 0.375rem 0.75rem;
+            font-size: 0.8125rem;
             border: 1px solid var(--gray-300);
             background: white;
-            border-radius: var(--radius-md);
-            font-size: 0.875rem;
             color: var(--gray-700);
             text-decoration: none;
-            transition: all var(--transition-fast);
+            border-radius: var(--border-radius-sm);
+            transition: all 0.2s ease;
         }
         
         .period-button:hover {
@@ -362,65 +272,59 @@ foreach ($statsByHour as $hour) {
         }
         
         .period-button.active {
-            background: var(--primary-blue);
+            background: var(--primary-green);
             color: white;
-            border-color: var(--primary-blue);
+            border-color: var(--primary-green);
         }
         
-        /* Stats Overview */
+        /* Stats Overview Cards */
         .stats-overview {
             display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
             gap: 1rem;
             margin-bottom: 1.5rem;
         }
         
         .stat-card {
             background: white;
-            border-radius: var(--radius-lg);
-            padding: 1.5rem;
-            box-shadow: 0 1px 3px rgba(0, 0, 0, 0.05);
+            border-radius: var(--border-radius-lg);
+            padding: 1.25rem;
+            box-shadow: var(--shadow-sm);
+            position: relative;
+            overflow: hidden;
         }
         
         .stat-header {
             display: flex;
             justify-content: space-between;
             align-items: flex-start;
-            margin-bottom: 0.75rem;
-        }
-        
-        .stat-icon {
-            width: 48px;
-            height: 48px;
-            background: var(--gray-100);
-            border-radius: var(--radius-md);
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            font-size: 1.5rem;
         }
         
         .stat-value {
             font-size: 2rem;
-            font-weight: 600;
+            font-weight: 700;
             color: var(--gray-900);
             line-height: 1;
+            margin-bottom: 0.25rem;
         }
         
         .stat-label {
             font-size: 0.875rem;
             color: var(--gray-600);
-            margin-top: 0.5rem;
+            margin-bottom: 0.25rem;
         }
         
         .stat-change {
             font-size: 0.75rem;
-            color: var(--success-green);
-            margin-top: 0.25rem;
+            color: var(--gray-500);
         }
         
-        .stat-change.negative {
-            color: var(--danger-red);
+        .stat-icon {
+            font-size: 2rem;
+            opacity: 0.1;
+            position: absolute;
+            right: 1rem;
+            bottom: 1rem;
         }
         
         /* Dashboard Grid */
@@ -433,13 +337,14 @@ foreach ($statsByHour as $hour) {
         /* Widget */
         .widget {
             background: white;
-            border-radius: var(--radius-lg);
-            box-shadow: 0 1px 3px rgba(0, 0, 0, 0.05);
+            border-radius: var(--border-radius-lg);
+            box-shadow: var(--shadow-sm);
             overflow: hidden;
         }
         
         .widget-header {
             padding: 1rem 1.25rem;
+            background: var(--gray-50);
             border-bottom: 1px solid var(--gray-200);
             display: flex;
             justify-content: space-between;
@@ -450,157 +355,152 @@ foreach ($statsByHour as $hour) {
             font-size: 1rem;
             font-weight: 600;
             color: var(--gray-800);
+            margin: 0;
         }
         
         .widget-content {
             padding: 1.25rem;
         }
         
-        /* Table */
-        .stats-table {
-            width: 100%;
-            font-size: 0.875rem;
-        }
-        
-        .table-header {
-            display: grid;
-            grid-template-columns: 2fr 1fr 1fr 1fr 1fr;
-            gap: 0.5rem;
-            padding: 0.75rem 0;
-            border-bottom: 2px solid var(--gray-200);
-            font-weight: 600;
-            color: var(--gray-700);
-        }
-        
-        .table-row {
-            display: grid;
-            grid-template-columns: 2fr 1fr 1fr 1fr 1fr;
-            gap: 0.5rem;
-            padding: 0.75rem 0;
-            border-bottom: 1px solid var(--gray-100);
-            align-items: center;
-        }
-        
-        .table-row:last-child {
-            border-bottom: none;
-        }
-        
-        .operator-info {
+        /* Top List */
+        .top-list {
             display: flex;
-            align-items: center;
+            flex-direction: column;
             gap: 0.75rem;
         }
         
-        .operator-avatar {
+        .top-item {
+            display: flex;
+            align-items: center;
+            padding: 0.75rem;
+            background: var(--gray-50);
+            border-radius: var(--border-radius-sm);
+            transition: all 0.2s ease;
+        }
+        
+        .top-item:hover {
+            background: var(--gray-100);
+            transform: translateX(4px);
+        }
+        
+        .top-position {
             width: 32px;
             height: 32px;
-            background: var(--gray-200);
-            border-radius: 50%;
             display: flex;
             align-items: center;
             justify-content: center;
-            font-size: 0.75rem;
-            font-weight: 600;
-            color: var(--gray-600);
-        }
-        
-        .operator-name {
-            font-weight: 500;
-            color: var(--gray-900);
-        }
-        
-        .operator-code {
-            font-size: 0.75rem;
-            color: var(--gray-500);
-        }
-        
-        /* Charts */
-        .chart-container {
-            height: 300px;
-            position: relative;
-            margin-top: 1rem;
-        }
-        
-        .chart-bar {
-            display: flex;
-            align-items: flex-end;
-            height: 200px;
-            gap: 0.5rem;
-            padding: 0 0.5rem;
-        }
-        
-        .bar-item {
-            flex: 1;
-            display: flex;
-            flex-direction: column;
-            align-items: center;
-            justify-content: flex-end;
-        }
-        
-        .bar {
-            width: 100%;
-            background: var(--primary-blue);
-            border-radius: var(--radius-sm) var(--radius-sm) 0 0;
-            transition: all var(--transition-fast);
-            position: relative;
-        }
-        
-        .bar:hover {
-            background: var(--accent-orange);
-        }
-        
-        .bar-label {
-            font-size: 0.75rem;
-            color: var(--gray-600);
-            margin-top: 0.5rem;
-            text-align: center;
-        }
-        
-        .bar-value {
-            position: absolute;
-            top: -20px;
-            left: 50%;
-            transform: translateX(-50%);
-            font-size: 0.75rem;
-            font-weight: 600;
-            color: var(--gray-700);
-        }
-        
-        /* Progress bars */
-        .progress-list {
-            display: flex;
-            flex-direction: column;
-            gap: 1rem;
-        }
-        
-        .progress-item {
-            display: flex;
-            flex-direction: column;
-            gap: 0.5rem;
-        }
-        
-        .progress-header {
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
+            font-weight: 700;
+            border-radius: 50%;
+            margin-right: 0.75rem;
             font-size: 0.875rem;
         }
         
-        .progress-bar {
-            height: 8px;
-            background: var(--gray-200);
-            border-radius: 4px;
-            overflow: hidden;
+        .top-position.gold {
+            background: #ffd700;
+            color: #7c6200;
         }
         
-        .progress-fill {
+        .top-position.silver {
+            background: #c0c0c0;
+            color: #5a5a5a;
+        }
+        
+        .top-position.bronze {
+            background: #cd7f32;
+            color: #5d3a16;
+        }
+        
+        .top-info {
+            flex: 1;
+        }
+        
+        .top-name {
+            font-weight: 600;
+            color: var(--gray-900);
+            font-size: 0.875rem;
+        }
+        
+        .top-details {
+            font-size: 0.75rem;
+            color: var(--gray-600);
+            margin-top: 0.125rem;
+        }
+        
+        .top-value {
+            text-align: right;
+            font-weight: 600;
+            color: var(--primary-green);
+            font-size: 0.875rem;
+        }
+        
+        /* Chart Container */
+        .chart-container {
+            height: 300px;
+            position: relative;
+        }
+        
+        .chart-placeholder {
+            display: flex;
+            align-items: center;
+            justify-content: center;
             height: 100%;
-            background: var(--primary-blue);
-            border-radius: 4px;
-            transition: width 0.3s ease;
+            color: var(--gray-400);
+            font-size: 0.875rem;
+            text-align: center;
         }
         
-        /* Empty state */
+        /* Trend Table */
+        .trend-table {
+            width: 100%;
+            font-size: 0.8125rem;
+        }
+        
+        .trend-table th {
+            text-align: left;
+            padding: 0.5rem;
+            font-weight: 600;
+            color: var(--gray-700);
+            border-bottom: 2px solid var(--gray-200);
+            font-size: 0.75rem;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+        }
+        
+        .trend-table td {
+            padding: 0.5rem;
+            border-bottom: 1px solid var(--gray-100);
+        }
+        
+        .trend-table tr:hover td {
+            background: var(--gray-50);
+        }
+        
+        /* Inactive List */
+        .inactive-list {
+            display: flex;
+            flex-direction: column;
+            gap: 0.5rem;
+        }
+        
+        .inactive-item {
+            padding: 0.75rem;
+            background: var(--gray-50);
+            border-radius: var(--border-radius-sm);
+            font-size: 0.8125rem;
+        }
+        
+        .inactive-name {
+            font-weight: 600;
+            color: var(--gray-900);
+        }
+        
+        .inactive-email {
+            color: var(--gray-600);
+            font-size: 0.75rem;
+            margin-top: 0.125rem;
+        }
+        
+        /* Empty State */
         .empty-state {
             text-align: center;
             padding: 3rem;
@@ -625,313 +525,375 @@ foreach ($statsByHour as $hour) {
         }
         
         @media (max-width: 768px) {
-            .main-header {
+            .page-header {
                 flex-direction: column;
                 gap: 1rem;
                 align-items: flex-start;
             }
             
             .period-selector {
+                flex-direction: column;
+                align-items: flex-start;
+            }
+            
+            .period-buttons {
+                width: 100%;
                 flex-wrap: wrap;
             }
             
-            .table-header,
-            .table-row {
-                grid-template-columns: 2fr 1fr 1fr;
+            .stats-overview {
+                grid-template-columns: 1fr;
             }
             
-            .table-header > div:nth-child(4),
-            .table-header > div:nth-child(5),
-            .table-row > div:nth-child(4),
-            .table-row > div:nth-child(5) {
-                display: none;
+            .top-item {
+                flex-wrap: wrap;
             }
         }
     </style>
 </head>
-<body>
-    <div class="stats-container">
-        <!-- Breadcrumb Navigation -->
-        <div class="breadcrumb">
-            <a href="/crm/?action=dashboard">Dashboard</a> / 
-            <a href="/crm/?action=operatori">Operatori</a> / 
-            <span>Statistiche Team</span>
-        </div>
-
-        <!-- Header -->
-        <header class="main-header">
-            <div class="header-left">
-                <h1>📊 Statistiche Team</h1>
-                <p>Analisi performance del team operatori</p>
-            </div>
-            <div class="header-actions">
-                <a href="/crm/?action=operatori" class="btn btn-secondary">
-                    ← Torna alla Lista
-                </a>
-                <a href="/crm/?action=dashboard" class="btn btn-outline">
-                    🏠 Dashboard
-                </a>
-            </div>
-        </header>
-
-        <!-- Period Selector -->
-        <div class="period-selector">
-            <label>Periodo di analisi:</label>
-            <a href="/crm/?action=operatori&view=stats&periodo=7" 
-               class="period-button <?= $periodo == '7' ? 'active' : '' ?>">
-                Ultima settimana
-            </a>
-            <a href="/crm/?action=operatori&view=stats&periodo=30" 
-               class="period-button <?= $periodo == '30' ? 'active' : '' ?>">
-                Ultimo mese
-            </a>
-            <a href="/crm/?action=operatori&view=stats&periodo=90" 
-               class="period-button <?= $periodo == '90' ? 'active' : '' ?>">
-                Ultimi 3 mesi
-            </a>
-            <a href="/crm/?action=operatori&view=stats&periodo=365" 
-               class="period-button <?= $periodo == '365' ? 'active' : '' ?>">
-                Ultimo anno
-            </a>
-        </div>
-
-        <!-- Stats Overview -->
-        <div class="stats-overview">
-            <div class="stat-card">
-                <div class="stat-header">
-                    <div>
-                        <div class="stat-value"><?= $statsGenerali['operatori_attivi'] ?></div>
-                        <div class="stat-label">Operatori Attivi</div>
-                        <div class="stat-change">
-                            su <?= $statsGenerali['totale_operatori'] ?> totali
-                        </div>
-                    </div>
-                    <div class="stat-icon">👥</div>
-                </div>
-            </div>
+<body class="datev-compact">
+    <div class="app-layout">
+        <!-- ✅ COMPONENTE SIDEBAR (OBBLIGATORIO) -->
+        <?php include $_SERVER['DOCUMENT_ROOT'] . '/crm/components/navigation.php'; ?>
+        
+        <div class="content-wrapper">
+            <!-- ✅ COMPONENTE HEADER (OBBLIGATORIO) -->
+            <?php include $_SERVER['DOCUMENT_ROOT'] . '/crm/components/header.php'; ?>
             
-            <div class="stat-card">
-                <div class="stat-header">
-                    <div>
-                        <div class="stat-value"><?= formatHours($statsSessioni['ore_totali']) ?></div>
-                        <div class="stat-label">Ore Lavorate Totali</div>
-                        <div class="stat-change">
-                            <?= $statsSessioni['sessioni_totali'] ?> sessioni
+            <main class="main-content">
+                <div class="stats-container">
+                    <!-- Header -->
+                    <header class="page-header">
+                        <div class="header-left">
+                            <h1>📊 Statistiche Team</h1>
+                            <p>Analisi performance del team operatori</p>
+                        </div>
+                        <div class="header-actions">
+                            <a href="/crm/?action=operatori" class="btn btn-secondary">
+                                ← Torna alla Lista
+                            </a>
+                            <a href="/crm/?action=dashboard" class="btn btn-secondary">
+                                🏠 Dashboard
+                            </a>
+                        </div>
+                    </header>
+                    
+                    <!-- Period Selector -->
+                    <div class="period-selector">
+                        <label>Periodo di analisi:</label>
+                        <div class="period-buttons">
+                            <a href="/crm/?action=operatori&view=stats&periodo=7" 
+                               class="period-button <?= $periodo == '7' ? 'active' : '' ?>">
+                                Ultima settimana
+                            </a>
+                            <a href="/crm/?action=operatori&view=stats&periodo=30" 
+                               class="period-button <?= $periodo == '30' ? 'active' : '' ?>">
+                                Ultimo mese
+                            </a>
+                            <a href="/crm/?action=operatori&view=stats&periodo=90" 
+                               class="period-button <?= $periodo == '90' ? 'active' : '' ?>">
+                                Ultimi 3 mesi
+                            </a>
+                            <a href="/crm/?action=operatori&view=stats&periodo=365" 
+                               class="period-button <?= $periodo == '365' ? 'active' : '' ?>">
+                                Ultimo anno
+                            </a>
                         </div>
                     </div>
-                    <div class="stat-icon">⏰</div>
-                </div>
-            </div>
-            
-            <div class="stat-card">
-                <div class="stat-header">
-                    <div>
-                        <div class="stat-value"><?= formatHours($produttivitaMedia) ?></div>
-                        <div class="stat-label">Media Ore/Operatore</div>
-                        <div class="stat-change">
-                            <?= $statsSessioni['operatori_con_sessioni'] ?> operatori attivi
-                        </div>
-                    </div>
-                    <div class="stat-icon">📈</div>
-                </div>
-            </div>
-            
-            <div class="stat-card">
-                <div class="stat-header">
-                    <div>
-                        <div class="stat-value"><?= formatHours($statsSessioni['media_ore_sessione']) ?></div>
-                        <div class="stat-label">Durata Media Sessione</div>
-                        <div class="stat-change">
-                            per sessione completata
-                        </div>
-                    </div>
-                    <div class="stat-icon">🕐</div>
-                </div>
-            </div>
-        </div>
-
-        <!-- Dashboard Grid -->
-        <div class="dashboard-grid">
-            <!-- Top Operatori -->
-            <div class="widget">
-                <div class="widget-header">
-                    <h3 class="widget-title">🏆 Top Operatori per Ore Lavorate</h3>
-                </div>
-                <div class="widget-content">
-                    <?php if (empty($topOperatoriOre)): ?>
-                        <div class="empty-state">
-                            <div class="empty-state-icon">📊</div>
-                            <p>Nessun dato disponibile per il periodo selezionato</p>
-                        </div>
-                    <?php else: ?>
-                        <div class="stats-table">
-                            <div class="table-header">
-                                <div>Operatore</div>
-                                <div>Sessioni</div>
-                                <div>Ore Tot.</div>
-                                <div>Media/Sess.</div>
-                                <div>Posizione</div>
-                            </div>
-                            <?php 
-                            $position = 1;
-                            foreach ($topOperatoriOre as $operatore): 
-                            ?>
-                                <div class="table-row">
-                                    <div class="operator-info">
-                                        <div class="operator-avatar">
-                                            <?= strtoupper(substr($operatore['nome'], 0, 1) . substr($operatore['cognome'], 0, 1)) ?>
-                                        </div>
-                                        <div>
-                                            <div class="operator-name">
-                                                <?= htmlspecialchars($operatore['cognome'] . ' ' . $operatore['nome']) ?>
-                                            </div>
-                                            <div class="operator-code">
-                                                <?= htmlspecialchars($operatore['codice_operatore']) ?>
-                                            </div>
-                                        </div>
-                                    </div>
-                                    <div><?= $operatore['sessioni'] ?></div>
-                                    <div><strong><?= formatHours($operatore['ore_totali']) ?></strong></div>
-                                    <div><?= formatHours($operatore['media_ore_sessione']) ?></div>
-                                    <div>
-                                        <?php if ($position <= 3): ?>
-                                            <?= $position == 1 ? '🥇' : ($position == 2 ? '🥈' : '🥉') ?>
-                                        <?php else: ?>
-                                            #<?= $position ?>
-                                        <?php endif; ?>
+                    
+                    <!-- Stats Overview -->
+                    <div class="stats-overview">
+                        <div class="stat-card">
+                            <div class="stat-header">
+                                <div>
+                                    <div class="stat-value"><?= $statsGenerali['totale_operatori'] ?></div>
+                                    <div class="stat-label">Operatori Totali</div>
+                                    <div class="stat-change">
+                                        <?= $statsGenerali['operatori_attivi'] ?> attivi
                                     </div>
                                 </div>
-                            <?php 
-                            $position++;
-                            endforeach; 
-                            ?>
+                                <div class="stat-icon">👥</div>
+                            </div>
                         </div>
-                    <?php endif; ?>
-                </div>
-            </div>
-            
-            <!-- Statistiche Laterali -->
-            <div>
-                <!-- Distribuzione per Giorno -->
-                <div class="widget">
-                    <div class="widget-header">
-                        <h3 class="widget-title">📅 Attività per Giorno</h3>
-                    </div>
-                    <div class="widget-content">
-                        <?php if (empty($chartDataDays)): ?>
-                            <div class="empty-state">
-                                <div class="empty-state-icon">📊</div>
-                                <p>Nessun dato</p>
-                            </div>
-                        <?php else: ?>
-                            <div class="chart-bar">
-                                <?php 
-                                $maxSessions = max(array_column($chartDataDays, 'sessioni'));
-                                foreach ($chartDataDays as $day): 
-                                    $height = $maxSessions > 0 ? ($day['sessioni'] / $maxSessions * 100) : 0;
-                                ?>
-                                    <div class="bar-item">
-                                        <div class="bar" style="height: <?= $height ?>%;">
-                                            <span class="bar-value"><?= $day['sessioni'] ?></span>
-                                        </div>
-                                        <div class="bar-label"><?= substr($day['giorno'], 0, 3) ?></div>
-                                    </div>
-                                <?php endforeach; ?>
-                            </div>
-                        <?php endif; ?>
-                    </div>
-                </div>
-                
-                <!-- Distribuzione Clienti -->
-                <div class="widget" style="margin-top: 1.5rem;">
-                    <div class="widget-header">
-                        <h3 class="widget-title">🏢 Distribuzione Clienti</h3>
-                    </div>
-                    <div class="widget-content">
-                        <?php if (empty($statsClienti)): ?>
-                            <div class="empty-state">
-                                <div class="empty-state-icon">🏢</div>
-                                <p>Nessun cliente assegnato</p>
-                            </div>
-                        <?php else: ?>
-                            <div class="progress-list">
-                                <?php 
-                                $maxClienti = max(array_column($statsClienti, 'clienti_totali'));
-                                foreach (array_slice($statsClienti, 0, 5) as $op): 
-                                    $percentage = $maxClienti > 0 ? ($op['clienti_totali'] / $maxClienti * 100) : 0;
-                                ?>
-                                    <div class="progress-item">
-                                        <div class="progress-header">
-                                            <span><?= htmlspecialchars($op['cognome'] . ' ' . substr($op['nome'], 0, 1) . '.') ?></span>
-                                            <span><?= $op['clienti_totali'] ?> clienti</span>
-                                        </div>
-                                        <div class="progress-bar">
-                                            <div class="progress-fill" style="width: <?= $percentage ?>%;"></div>
-                                        </div>
-                                    </div>
-                                <?php endforeach; ?>
-                            </div>
-                        <?php endif; ?>
-                    </div>
-                </div>
-            </div>
-        </div>
-
-        <!-- Statistiche Orarie -->
-        <div class="widget" style="margin-top: 1.5rem;">
-            <div class="widget-header">
-                <h3 class="widget-title">🕐 Distribuzione Oraria Accessi</h3>
-            </div>
-            <div class="widget-content">
-                <?php if (empty($chartDataHours)): ?>
-                    <div class="empty-state">
-                        <div class="empty-state-icon">📊</div>
-                        <p>Nessun dato disponibile</p>
-                    </div>
-                <?php else: ?>
-                    <div class="chart-bar">
-                        <?php 
-                        // Crea array completo 24 ore
-                        $hoursData = array_fill(0, 24, 0);
-                        foreach ($statsByHour as $hour) {
-                            $hoursData[$hour['ora']] = $hour['sessioni'];
-                        }
                         
-                        $maxHourSessions = max($hoursData);
-                        for ($h = 0; $h < 24; $h++): 
-                            $height = $maxHourSessions > 0 ? ($hoursData[$h] / $maxHourSessions * 100) : 0;
-                            if ($h < 6 || $h > 20) continue; // Mostra solo ore lavorative
-                        ?>
-                            <div class="bar-item">
-                                <div class="bar" style="height: <?= $height ?>%; background: <?= $h >= 9 && $h <= 18 ? 'var(--primary-blue)' : 'var(--gray-400)' ?>;">
-                                    <?php if ($hoursData[$h] > 0): ?>
-                                        <span class="bar-value"><?= $hoursData[$h] ?></span>
+                        <div class="stat-card">
+                            <div class="stat-header">
+                                <div>
+                                    <div class="stat-value"><?= formatHours($statsSessioni['ore_totali']) ?></div>
+                                    <div class="stat-label">Ore Totali</div>
+                                    <div class="stat-change">
+                                        <?= $statsSessioni['sessioni_totali'] ?> sessioni
+                                    </div>
+                                </div>
+                                <div class="stat-icon">⏰</div>
+                            </div>
+                        </div>
+                        
+                        <div class="stat-card">
+                            <div class="stat-header">
+                                <div>
+                                    <div class="stat-value"><?= formatHours($produttivitaMedia) ?></div>
+                                    <div class="stat-label">Media Ore/Operatore</div>
+                                    <div class="stat-change">
+                                        <?= $statsSessioni['operatori_con_sessioni'] ?> operatori attivi
+                                    </div>
+                                </div>
+                                <div class="stat-icon">📈</div>
+                            </div>
+                        </div>
+                        
+                        <div class="stat-card">
+                            <div class="stat-header">
+                                <div>
+                                    <div class="stat-value"><?= formatHours($statsSessioni['media_ore_sessione']) ?></div>
+                                    <div class="stat-label">Durata Media Sessione</div>
+                                    <div class="stat-change">
+                                        per sessione completata
+                                    </div>
+                                </div>
+                                <div class="stat-icon">🕐</div>
+                            </div>
+                        </div>
+                        
+                        <div class="stat-card">
+                            <div class="stat-header">
+                                <div>
+                                    <div class="stat-value"><?= $statsSessioni['operatori_con_sessioni'] ?></div>
+                                    <div class="stat-label">Operatori Produttivi</div>
+                                    <div class="stat-change">
+                                        <?= $statsGenerali['nuovi_operatori'] ?> nuovi nel periodo
+                                    </div>
+                                </div>
+                                <div class="stat-icon">✅</div>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <!-- Dashboard Grid -->
+                    <div class="dashboard-grid">
+                        <!-- Colonna Principale -->
+                        <div>
+                            <!-- Top Operatori -->
+                            <div class="widget">
+                                <div class="widget-header">
+                                    <h3 class="widget-title">🏆 Top Operatori per Ore Lavorate</h3>
+                                </div>
+                                <div class="widget-content">
+                                    <?php if (empty($topOperatori)): ?>
+                                        <div class="empty-state">
+                                            <div class="empty-state-icon">📊</div>
+                                            <p>Nessun dato disponibile per il periodo selezionato</p>
+                                        </div>
+                                    <?php else: ?>
+                                        <div class="top-list">
+                                            <?php 
+                                            $position = 1;
+                                            foreach ($topOperatori as $op): 
+                                            ?>
+                                                <div class="top-item">
+                                                    <div class="top-position <?= $position == 1 ? 'gold' : ($position == 2 ? 'silver' : ($position == 3 ? 'bronze' : '')) ?>">
+                                                        <?= $position ?>
+                                                    </div>
+                                                    <div class="top-info">
+                                                        <div class="top-name">
+                                                            <?= htmlspecialchars($op['cognome'] . ' ' . $op['nome']) ?>
+                                                        </div>
+                                                        <div class="top-details">
+                                                            <?= $op['sessioni'] ?> sessioni • 
+                                                            Media: <?= $op['sessioni'] > 0 ? formatHours($op['ore_totali'] / $op['sessioni']) : '0h' ?>
+                                                        </div>
+                                                    </div>
+                                                    <div class="top-value">
+                                                        <?= formatHours($op['ore_totali']) ?>
+                                                    </div>
+                                                </div>
+                                            <?php 
+                                            $position++;
+                                            endforeach; 
+                                            ?>
+                                        </div>
                                     <?php endif; ?>
                                 </div>
-                                <div class="bar-label"><?= $h ?></div>
                             </div>
-                        <?php endfor; ?>
+                            
+                            <!-- Distribuzione Ore per Giorno -->
+                            <div class="widget" style="margin-top: 1.5rem;">
+                                <div class="widget-header">
+                                    <h3 class="widget-title">📅 Distribuzione Ore per Giorno</h3>
+                                </div>
+                                <div class="widget-content">
+                                    <div class="chart-container">
+                                        <div class="chart-placeholder">
+                                            <?php if (!empty($chartDataDays)): ?>
+                                                <!-- Grafico semplificato con barre CSS -->
+                                                <div style="width: 100%; height: 100%;">
+                                                    <?php 
+                                                    $maxOre = max(array_column($chartDataDays, 'ore'));
+                                                    foreach ($chartDataDays as $day): 
+                                                        $percentage = $maxOre > 0 ? ($day['ore'] / $maxOre * 100) : 0;
+                                                    ?>
+                                                        <div style="display: flex; align-items: center; margin-bottom: 0.75rem;">
+                                                            <div style="width: 80px; font-size: 0.75rem; color: var(--gray-600);">
+                                                                <?= substr($day['giorno'], 0, 3) ?>
+                                                            </div>
+                                                            <div style="flex: 1; height: 24px; background: var(--gray-100); border-radius: 4px; position: relative;">
+                                                                <div style="height: 100%; width: <?= $percentage ?>%; background: var(--primary-green); border-radius: 4px;"></div>
+                                                            </div>
+                                                            <div style="width: 50px; text-align: right; font-size: 0.75rem; font-weight: 600; color: var(--gray-700);">
+                                                                <?= $day['ore'] ?>h
+                                                            </div>
+                                                        </div>
+                                                    <?php endforeach; ?>
+                                                </div>
+                                            <?php else: ?>
+                                                <p>Nessun dato disponibile</p>
+                                            <?php endif; ?>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                            
+                            <!-- Trend Settimanale -->
+                            <div class="widget" style="margin-top: 1.5rem;">
+                                <div class="widget-header">
+                                    <h3 class="widget-title">📈 Trend Settimanale</h3>
+                                </div>
+                                <div class="widget-content">
+                                    <?php if (empty($trendSettimanale)): ?>
+                                        <div class="empty-state">
+                                            <div class="empty-state-icon">📈</div>
+                                            <p>Nessun dato disponibile</p>
+                                        </div>
+                                    <?php else: ?>
+                                        <table class="trend-table">
+                                            <thead>
+                                                <tr>
+                                                    <th>Settimana</th>
+                                                    <th>Operatori</th>
+                                                    <th>Sessioni</th>
+                                                    <th style="text-align: right;">Ore Totali</th>
+                                                </tr>
+                                            </thead>
+                                            <tbody>
+                                                <?php foreach (array_reverse($trendSettimanale) as $week): ?>
+                                                    <tr>
+                                                        <td>
+                                                            <?= date('d/m', strtotime($week['inizio_settimana'])) ?>
+                                                        </td>
+                                                        <td><?= $week['operatori_attivi'] ?></td>
+                                                        <td><?= $week['sessioni'] ?></td>
+                                                        <td style="text-align: right; font-weight: 600;">
+                                                            <?= formatHours($week['ore_totali']) ?>
+                                                        </td>
+                                                    </tr>
+                                                <?php endforeach; ?>
+                                            </tbody>
+                                        </table>
+                                    <?php endif; ?>
+                                </div>
+                            </div>
+                        </div>
+                        
+                        <!-- Colonna Laterale -->
+                        <div>
+                            <!-- Operatori Inattivi -->
+                            <div class="widget">
+                                <div class="widget-header">
+                                    <h3 class="widget-title">⚠️ Operatori Senza Sessioni</h3>
+                                </div>
+                                <div class="widget-content">
+                                    <?php if (empty($operatoriInattivi)): ?>
+                                        <div class="empty-state">
+                                            <div class="empty-state-icon">✅</div>
+                                            <p>Tutti gli operatori attivi hanno registrato sessioni</p>
+                                        </div>
+                                    <?php else: ?>
+                                        <div class="inactive-list">
+                                            <?php foreach ($operatoriInattivi as $op): ?>
+                                                <div class="inactive-item">
+                                                    <div class="inactive-name">
+                                                        <?= htmlspecialchars($op['cognome'] . ' ' . $op['nome']) ?>
+                                                    </div>
+                                                    <div class="inactive-email">
+                                                        <?= htmlspecialchars($op['email']) ?>
+                                                    </div>
+                                                </div>
+                                            <?php endforeach; ?>
+                                        </div>
+                                        <div style="text-align: center; margin-top: 1rem;">
+                                            <p style="font-size: 0.75rem; color: var(--gray-500);">
+                                                <?= count($operatoriInattivi) ?> operatori senza sessioni
+                                            </p>
+                                        </div>
+                                    <?php endif; ?>
+                                </div>
+                            </div>
+                            
+                            <!-- Riepilogo Rapido -->
+                            <div class="widget" style="margin-top: 1.5rem;">
+                                <div class="widget-header">
+                                    <h3 class="widget-title">📊 Riepilogo Rapido</h3>
+                                </div>
+                                <div class="widget-content">
+                                    <div style="display: flex; flex-direction: column; gap: 0.75rem;">
+                                        <div style="display: flex; justify-content: space-between; padding: 0.5rem 0; border-bottom: 1px solid var(--gray-100);">
+                                            <span style="color: var(--gray-600); font-size: 0.875rem;">Periodo analisi</span>
+                                            <span style="font-weight: 600; font-size: 0.875rem;">
+                                                <?= $periodo == '7' ? 'Ultima settimana' : 
+                                                    ($periodo == '30' ? 'Ultimo mese' : 
+                                                    ($periodo == '90' ? 'Ultimi 3 mesi' : 'Ultimo anno')) ?>
+                                            </span>
+                                        </div>
+                                        
+                                        <div style="display: flex; justify-content: space-between; padding: 0.5rem 0; border-bottom: 1px solid var(--gray-100);">
+                                            <span style="color: var(--gray-600); font-size: 0.875rem;">Tasso attività</span>
+                                            <span style="font-weight: 600; font-size: 0.875rem;">
+                                                <?= $statsGenerali['operatori_attivi'] > 0 ? 
+                                                    round($statsSessioni['operatori_con_sessioni'] / $statsGenerali['operatori_attivi'] * 100) : 0 ?>%
+                                            </span>
+                                        </div>
+                                        
+                                        <div style="display: flex; justify-content: space-between; padding: 0.5rem 0; border-bottom: 1px solid var(--gray-100);">
+                                            <span style="color: var(--gray-600); font-size: 0.875rem;">Media giornaliera</span>
+                                            <span style="font-weight: 600; font-size: 0.875rem;">
+                                                <?= formatHours($statsSessioni['ore_totali'] / max($periodo, 1)) ?>
+                                            </span>
+                                        </div>
+                                        
+                                        <div style="display: flex; justify-content: space-between; padding: 0.5rem 0;">
+                                            <span style="color: var(--gray-600); font-size: 0.875rem;">Amministratori</span>
+                                            <span style="font-weight: 600; font-size: 0.875rem;">
+                                                <?= $statsGenerali['amministratori'] ?>
+                                            </span>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                            
+                            <!-- Export Actions -->
+                            <div class="widget" style="margin-top: 1.5rem;">
+                                <div class="widget-header">
+                                    <h3 class="widget-title">📥 Esporta Dati</h3>
+                                </div>
+                                <div class="widget-content">
+                                    <p style="font-size: 0.875rem; color: var(--gray-600); margin-bottom: 1rem;">
+                                        Esporta i dati statistici per analisi esterne
+                                    </p>
+                                    <div style="display: flex; flex-direction: column; gap: 0.5rem;">
+                                        <button class="btn btn-secondary btn-block" onclick="alert('Funzionalità export in sviluppo')">
+                                            📊 Export Excel
+                                        </button>
+                                        <button class="btn btn-secondary btn-block" onclick="alert('Funzionalità export in sviluppo')">
+                                            📄 Report PDF
+                                        </button>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
                     </div>
-                    <p style="text-align: center; margin-top: 1rem; font-size: 0.75rem; color: var(--gray-500);">
-                        Orario (fascia 6:00 - 21:00)
-                    </p>
-                <?php endif; ?>
-            </div>
+                </div>
+            </main>
         </div>
     </div>
-
-    <script>
-        // Animazione progress bars
-        document.addEventListener('DOMContentLoaded', () => {
-            const progressBars = document.querySelectorAll('.progress-fill');
-            progressBars.forEach(bar => {
-                const width = bar.style.width;
-                bar.style.width = '0';
-                setTimeout(() => {
-                    bar.style.width = width;
-                }, 100);
-            });
-        });
-    </script>
 </body>
 </html>
