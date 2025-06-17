@@ -2,6 +2,7 @@
 /**
  * modules/clienti/export.php - Export Dati Cliente CRM Re.De Consulting
  * 
+ * ✅ VERSIONE CON SIDEBAR E HEADER CENTRALIZZATI
  * ✅ EXPORT PROFESSIONALE COMMERCIALISTI COMPLIANT
  * 
  * Features:
@@ -9,9 +10,6 @@
  * - Template specifici per dichiarazioni e controlli
  * - Export multiplo clienti selezionati
  * - Formattazione professionale per uso fiscale
- * - Protezione dati e controllo accessi
- * - Export pratiche e scadenze associate
- * - Compatibilità con software fiscali standard
  */
 
 // Avvia sessione se non già attiva
@@ -19,19 +17,48 @@ if (session_status() === PHP_SESSION_NONE) {
     session_start();
 }
 
-// Percorsi assoluti robusti
-require_once $_SERVER['DOCUMENT_ROOT'] . '/crm/core/classes/Database.php';
-require_once $_SERVER['DOCUMENT_ROOT'] . '/crm/core/auth/AuthSystem.php';
-require_once $_SERVER['DOCUMENT_ROOT'] . '/crm/core/functions/helpers.php';
+// Definisci che siamo nel CRM per router
+if (!defined('CRM_INIT')) {
+    define('CRM_INIT', true);
+}
+
+// Include bootstrap per autenticazione
+require_once dirname(dirname(__DIR__)) . '/core/bootstrap.php';
 
 // Verifica autenticazione
-if (!AuthSystem::isAuthenticated()) {
-    header('Location: /crm/core/auth/login.php');
+if (!isAuthenticated()) {
+    header('Location: ' . LOGIN_URL);
     exit;
 }
 
-$sessionInfo = AuthSystem::getSessionInfo();
+// Carica helpers e database
+loadDatabase();
+loadHelpers();
+
+// Prepara sessionInfo per compatibilità
+$currentUser = getCurrentUser();
+$sessionInfo = [
+    'operatore_id' => $currentUser['id'],
+    'user_id' => $currentUser['id'],
+    'nome' => $currentUser['nome'],
+    'cognome' => $currentUser['cognome'],
+    'email' => $currentUser['email'],
+    'nome_completo' => $currentUser['nome'] . ' ' . $currentUser['cognome'],
+    'is_admin' => $currentUser['is_admin']
+];
+
 $db = Database::getInstance();
+
+// Variabili per i componenti
+$pageTitle = 'Export Clienti';
+$pageIcon = '📊';
+
+// Solo admin possono fare export
+if (!$sessionInfo['is_admin']) {
+    $_SESSION['error_message'] = '⚠️ Solo gli amministratori possono esportare i dati';
+    header('Location: /crm/?action=clienti');
+    exit;
+}
 
 // Parametri export
 $exportType = $_GET['type'] ?? 'excel';
@@ -39,490 +66,659 @@ $clienteId = isset($_GET['id']) ? (int)$_GET['id'] : null;
 $clienteIds = isset($_GET['ids']) ? explode(',', $_GET['ids']) : [];
 $template = $_GET['template'] ?? 'completo';
 
-// Validazione parametri
-if (!$clienteId && empty($clienteIds)) {
-    die('Errore: Nessun cliente specificato per l\'export');
+// Se c'è una richiesta di download diretto
+if (isset($_GET['download']) && $_GET['download'] === '1') {
+    processExport();
+    exit;
 }
 
+// Altrimenti mostra la pagina di configurazione export
+
+// Templates disponibili
+$templates = [
+    'completo' => [
+        'label' => '📊 Export Completo',
+        'description' => 'Tutti i dati del cliente inclusi pratiche e documenti'
+    ],
+    'fiscale' => [
+        'label' => '🧾 Dati Fiscali',
+        'description' => 'Solo dati fiscali per dichiarazioni (CF, P.IVA, sede)'
+    ],
+    'contatti' => [
+        'label' => '📞 Rubrica Contatti',
+        'description' => 'Anagrafica e contatti per comunicazioni massive'
+    ],
+    'pratiche' => [
+        'label' => '📋 Pratiche Associate',
+        'description' => 'Lista pratiche e scadenze per cliente'
+    ],
+    'sintetico' => [
+        'label' => '📄 Report Sintetico',
+        'description' => 'Vista compatta con dati essenziali'
+    ]
+];
+
+// Formati disponibili
+$formati = [
+    'excel' => ['label' => '📗 Excel (.xlsx)', 'icon' => '📗'],
+    'csv' => ['label' => '📄 CSV', 'icon' => '📄'],
+    'pdf' => ['label' => '📕 PDF', 'icon' => '📕']
+];
+
+// Se ci sono clienti selezionati, carica i loro dati
+$clientiSelezionati = [];
 if ($clienteId) {
     $clienteIds = [$clienteId];
 }
 
-// Sanitize IDs
-$clienteIds = array_filter(array_map('intval', $clienteIds));
-
-if (empty($clienteIds)) {
-    die('Errore: ID clienti non validi');
+if (!empty($clienteIds)) {
+    $placeholders = str_repeat('?,', count($clienteIds) - 1) . '?';
+    $clientiSelezionati = $db->select("
+        SELECT id, ragione_sociale, codice_fiscale, partita_iva
+        FROM clienti
+        WHERE id IN ($placeholders)
+        ORDER BY ragione_sociale
+    ", $clienteIds);
 }
 
-try {
-    // Carica dati clienti
+// Funzione per processare l'export
+function processExport() {
+    global $db, $sessionInfo, $exportType, $clienteIds, $template;
+    
+    if (empty($clienteIds)) {
+        die('Errore: Nessun cliente selezionato');
+    }
+    
+    // Carica dati in base al template
     $placeholders = str_repeat('?,', count($clienteIds) - 1) . '?';
     
+    // Query base clienti
     $clienti = $db->select("
         SELECT 
             c.*,
-            CONCAT(o.nome, ' ', o.cognome) as operatore_responsabile_nome,
-            o.email as operatore_email,
-            
-            -- Conteggio pratiche
-            (SELECT COUNT(*) FROM pratiche p WHERE p.cliente_id = c.id) as totale_pratiche,
-            (SELECT COUNT(*) FROM pratiche p WHERE p.cliente_id = c.id AND p.stato IN ('da_iniziare', 'in_corso')) as pratiche_attive,
-            (SELECT COUNT(*) FROM pratiche p WHERE p.cliente_id = c.id AND p.stato = 'completata') as pratiche_completate,
-            
-            -- Ultima comunicazione
-            (SELECT MAX(data_nota) FROM note_clienti nc WHERE nc.cliente_id = c.id) as ultima_comunicazione,
-            
-            -- Conteggio documenti
-            (SELECT COUNT(*) FROM documenti_clienti dc WHERE dc.cliente_id = c.id) as totale_documenti
-            
+            CONCAT(o.nome, ' ', o.cognome) as operatore_nome,
+            (SELECT COUNT(*) FROM pratiche WHERE cliente_id = c.id) as totale_pratiche,
+            (SELECT COUNT(*) FROM documenti_clienti WHERE cliente_id = c.id) as totale_documenti
         FROM clienti c
         LEFT JOIN operatori o ON c.operatore_responsabile_id = o.id
         WHERE c.id IN ($placeholders)
         ORDER BY c.ragione_sociale
     ", $clienteIds);
     
-    if (empty($clienti)) {
-        die('Errore: Nessun cliente trovato con gli ID specificati');
-    }
-    
-    // Se richieste, carica anche pratiche associate
-    $pratiche = [];
-    if ($template === 'completo' || $template === 'pratiche') {
-        $pratiche = $db->select("
-            SELECT 
-                p.*,
-                c.ragione_sociale as cliente_nome,
-                s.nome as settore_nome,
-                CONCAT(o.nome, ' ', o.cognome) as operatore_nome
-            FROM pratiche p
-            LEFT JOIN clienti c ON p.cliente_id = c.id
-            LEFT JOIN settori s ON p.settore_id = s.id
-            LEFT JOIN operatori o ON p.operatore_assegnato_id = o.id
-            WHERE p.cliente_id IN ($placeholders)
-            ORDER BY c.ragione_sociale, p.data_scadenza ASC
-        ", $clienteIds);
-    }
-    
-    // Genera export basato sul tipo richiesto
+    // Genera export in base al formato
     switch ($exportType) {
-        case 'excel':
-            generateExcelExport($clienti, $pratiche, $template);
-            break;
         case 'csv':
-            generateCSVExport($clienti, $pratiche, $template);
+            generateCSV($clienti, $template);
             break;
         case 'pdf':
-            generatePDFExport($clienti, $pratiche, $template);
+            generatePDF($clienti, $template);
             break;
+        case 'excel':
         default:
-            die('Tipo di export non supportato');
+            generateExcel($clienti, $template);
+            break;
     }
-    
-} catch (Exception $e) {
-    error_log("Errore export clienti: " . $e->getMessage());
-    die('Errore durante l\'export: ' . $e->getMessage());
 }
 
-/**
- * Genera export Excel/XLSX
- */
-function generateExcelExport($clienti, $pratiche, $template) {
-    $filename = 'export_clienti_' . date('Y-m-d_H-i-s') . '.csv';
+// Funzione per generare CSV
+function generateCSV($clienti, $template) {
+    $filename = 'export_clienti_' . date('Y-m-d_His') . '.csv';
     
     header('Content-Type: text/csv; charset=utf-8');
     header('Content-Disposition: attachment; filename="' . $filename . '"');
-    header('Cache-Control: no-cache, must-revalidate');
-    header('Expires: 0');
     
     $output = fopen('php://output', 'w');
     
-    // BOM per UTF-8
-    fwrite($output, "\xEF\xBB\xBF");
+    // BOM per Excel
+    fprintf($output, chr(0xEF).chr(0xBB).chr(0xBF));
     
+    // Headers in base al template
     switch ($template) {
         case 'fiscale':
-            generateFiscaleTemplate($output, $clienti);
-            break;
-        case 'pratiche':
-            generatePraticheTemplate($output, $clienti, $pratiche);
+            $headers = ['ID', 'Ragione Sociale', 'Codice Fiscale', 'Partita IVA', 'Codice SDI', 'Indirizzo', 'CAP', 'Città', 'Provincia'];
             break;
         case 'contatti':
-            generateContattiTemplate($output, $clienti);
+            $headers = ['ID', 'Ragione Sociale', 'Email', 'PEC', 'Telefono', 'Indirizzo Completo'];
             break;
-        default: // completo
-            generateCompletoTemplate($output, $clienti, $pratiche);
+        default:
+            $headers = ['ID', 'Ragione Sociale', 'CF/P.IVA', 'Email', 'Telefono', 'Operatore', 'Stato', 'Pratiche', 'Documenti'];
+    }
+    
+    fputcsv($output, $headers, ';');
+    
+    // Dati
+    foreach ($clienti as $cliente) {
+        switch ($template) {
+            case 'fiscale':
+                $row = [
+                    $cliente['id'],
+                    $cliente['ragione_sociale'],
+                    $cliente['codice_fiscale'],
+                    $cliente['partita_iva'],
+                    $cliente['codice_univoco'],
+                    $cliente['indirizzo'],
+                    $cliente['cap'],
+                    $cliente['citta'],
+                    $cliente['provincia']
+                ];
+                break;
+            case 'contatti':
+                $indirizzo = implode(' ', array_filter([
+                    $cliente['indirizzo'],
+                    $cliente['cap'],
+                    $cliente['citta'],
+                    $cliente['provincia'] ? '(' . $cliente['provincia'] . ')' : ''
+                ]));
+                $row = [
+                    $cliente['id'],
+                    $cliente['ragione_sociale'],
+                    $cliente['email'],
+                    $cliente['pec'],
+                    $cliente['telefono'],
+                    $indirizzo
+                ];
+                break;
+            default:
+                $cf_piva = $cliente['codice_fiscale'] ?: $cliente['partita_iva'];
+                $row = [
+                    $cliente['id'],
+                    $cliente['ragione_sociale'],
+                    $cf_piva,
+                    $cliente['email'],
+                    $cliente['telefono'],
+                    $cliente['operatore_nome'] ?: 'Non assegnato',
+                    ucfirst($cliente['stato']),
+                    $cliente['totale_pratiche'],
+                    $cliente['totale_documenti']
+                ];
+        }
+        
+        fputcsv($output, $row, ';');
     }
     
     fclose($output);
     exit;
 }
 
-/**
- * Genera export CSV
- */
-function generateCSVExport($clienti, $pratiche, $template) {
-    generateExcelExport($clienti, $pratiche, $template); // Usa stesso motore
-}
-
-/**
- * Template Export Fiscale - Solo dati essenziali per dichiarazioni
- */
-function generateFiscaleTemplate($output, $clienti) {
-    // Header
-    fputcsv($output, [
-        'Codice Cliente',
-        'Ragione Sociale',
-        'Codice Fiscale',
-        'Partita IVA',
-        'Tipologia Azienda',
-        'Regime Fiscale',
-        'Liquidazione IVA',
-        'Indirizzo',
-        'CAP',
-        'Città',
-        'Provincia',
-        'Email',
-        'PEC',
-        'Telefono',
-        'Data Costituzione',
-        'Capitale Sociale',
-        'Codice ATECO',
-        'Settore Attività',
-        'Stato',
-        'Note Fiscali'
-    ], ';');
+// Stub per altre funzioni di export
+function generateExcel($clienti, $template) {
+    // In produzione useresti PHPSpreadsheet
+    // Per ora generiamo CSV con estensione .xls
+    header('Content-Type: application/vnd.ms-excel');
+    header('Content-Disposition: attachment; filename="export_clienti_' . date('Y-m-d_His') . '.xls"');
     
-    // Dati
-    foreach ($clienti as $cliente) {
-        fputcsv($output, [
-            $cliente['codice_cliente'],
-            $cliente['ragione_sociale'],
-            $cliente['codice_fiscale'],
-            $cliente['partita_iva'],
-            ucfirst($cliente['tipologia_azienda']),
-            ucfirst($cliente['regime_fiscale']),
-            ucfirst($cliente['liquidazione_iva']),
-            $cliente['indirizzo'],
-            $cliente['cap'],
-            $cliente['citta'],
-            $cliente['provincia'],
-            $cliente['email'],
-            $cliente['pec'],
-            $cliente['telefono'],
-            $cliente['data_costituzione'],
-            $cliente['capitale_sociale'],
-            $cliente['codice_ateco'],
-            $cliente['settore_attivita'],
-            $cliente['is_attivo'] ? 'Attivo' : 'Sospeso',
-            $cliente['note_generali']
-        ], ';');
-    }
-}
-
-/**
- * Template Export Completo - Tutti i dati disponibili
- */
-function generateCompletoTemplate($output, $clienti, $pratiche) {
-    // Header Clienti
-    fputcsv($output, [
-        'DATI CLIENTI'
-    ], ';');
-    
-    fputcsv($output, [
-        'Codice Cliente',
-        'Ragione Sociale',
-        'Codice Fiscale', 
-        'Partita IVA',
-        'Tipologia',
-        'Regime Fiscale',
-        'Liquidazione IVA',
-        'Email',
-        'PEC', 
-        'Telefono',
-        'Cellulare',
-        'Indirizzo Completo',
-        'CAP',
-        'Città',
-        'Provincia',
-        'Operatore Responsabile',
-        'Stato',
-        'Creato il',
-        'Ultima Modifica',
-        'Totale Pratiche',
-        'Pratiche Attive',
-        'Pratiche Completate',
-        'Ultima Comunicazione',
-        'Totale Documenti',
-        'Note'
-    ], ';');
-    
-    // Dati Clienti
-    foreach ($clienti as $cliente) {
-        fputcsv($output, [
-            $cliente['codice_cliente'],
-            $cliente['ragione_sociale'],
-            $cliente['codice_fiscale'],
-            $cliente['partita_iva'],
-            ucfirst($cliente['tipologia_azienda']),
-            ucfirst($cliente['regime_fiscale']),
-            ucfirst($cliente['liquidazione_iva']),
-            $cliente['email'],
-            $cliente['pec'],
-            $cliente['telefono'],
-            $cliente['cellulare'],
-            $cliente['indirizzo'],
-            $cliente['cap'],
-            $cliente['citta'],
-            $cliente['provincia'],
-            $cliente['operatore_responsabile_nome'],
-            $cliente['is_attivo'] ? 'Attivo' : 'Sospeso',
-            date('d/m/Y', strtotime($cliente['created_at'])),
-            date('d/m/Y', strtotime($cliente['updated_at'])),
-            $cliente['totale_pratiche'],
-            $cliente['pratiche_attive'],
-            $cliente['pratiche_completate'],
-            $cliente['ultima_comunicazione'] ? date('d/m/Y', strtotime($cliente['ultima_comunicazione'])) : '',
-            $cliente['totale_documenti'],
-            $cliente['note_generali']
-        ], ';');
-    }
-    
-    // Se ci sono pratiche, aggiungile
-    if (!empty($pratiche)) {
-        fputcsv($output, [], ';'); // Riga vuota
-        fputcsv($output, ['PRATICHE ASSOCIATE'], ';');
-        
-        fputcsv($output, [
-            'Cliente',
-            'Titolo Pratica',
-            'Settore',
-            'Stato',
-            'Priorità',
-            'Data Scadenza',
-            'Operatore Assegnato',
-            'Ore Stimate',
-            'Ore Lavorate',
-            'Creata il',
-            'Descrizione'
-        ], ';');
-        
-        foreach ($pratiche as $pratica) {
-            fputcsv($output, [
-                $pratica['cliente_nome'],
-                $pratica['titolo'],
-                $pratica['settore_nome'],
-                ucfirst($pratica['stato']),
-                ucfirst($pratica['priorita']),
-                $pratica['data_scadenza'] ? date('d/m/Y', strtotime($pratica['data_scadenza'])) : '',
-                $pratica['operatore_nome'],
-                $pratica['ore_stimate'],
-                $pratica['ore_lavorate'],
-                date('d/m/Y', strtotime($pratica['created_at'])),
-                $pratica['descrizione']
-            ], ';');
-        }
-    }
-}
-
-/**
- * Template Export Pratiche
- */
-function generatePraticheTemplate($output, $clienti, $pratiche) {
-    fputcsv($output, [
-        'Cliente',
-        'Codice Cliente',
-        'Codice Fiscale',
-        'Partita IVA',
-        'Titolo Pratica',
-        'Settore',
-        'Stato Pratica',
-        'Priorità',
-        'Data Scadenza',
-        'Operatore Assegnato',
-        'Ore Stimate',
-        'Ore Lavorate',
-        'Percentuale Completamento',
-        'Giorni Rimanenti',
-        'Creata il',
-        'Descrizione'
-    ], ';');
-    
-    foreach ($pratiche as $pratica) {
-        $cliente = array_filter($clienti, fn($c) => $c['id'] == $pratica['cliente_id']);
-        $cliente = reset($cliente);
-        
-        $giorniRimanenti = '';
-        if ($pratica['data_scadenza']) {
-            $diff = (strtotime($pratica['data_scadenza']) - time()) / (60 * 60 * 24);
-            $giorniRimanenti = round($diff);
-        }
-        
-        $percentualeCompletamento = '';
-        if ($pratica['ore_stimate'] > 0) {
-            $percentualeCompletamento = round(($pratica['ore_lavorate'] / $pratica['ore_stimate']) * 100, 1) . '%';
-        }
-        
-        fputcsv($output, [
-            $pratica['cliente_nome'],
-            $cliente['codice_cliente'] ?? '',
-            $cliente['codice_fiscale'] ?? '',
-            $cliente['partita_iva'] ?? '',
-            $pratica['titolo'],
-            $pratica['settore_nome'],
-            ucfirst($pratica['stato']),
-            ucfirst($pratica['priorita']),
-            $pratica['data_scadenza'] ? date('d/m/Y', strtotime($pratica['data_scadenza'])) : '',
-            $pratica['operatore_nome'],
-            $pratica['ore_stimate'],
-            $pratica['ore_lavorate'],
-            $percentualeCompletamento,
-            $giorniRimanenti,
-            date('d/m/Y', strtotime($pratica['created_at'])),
-            $pratica['descrizione']
-        ], ';');
-    }
-}
-
-/**
- * Template Export Contatti
- */
-function generateContattiTemplate($output, $clienti) {
-    fputcsv($output, [
-        'Ragione Sociale',
-        'Tipologia',
-        'Email Principale',
-        'PEC',
-        'Telefono Fisso',
-        'Cellulare',
-        'Indirizzo',
-        'CAP',
-        'Città',
-        'Provincia',
-        'Operatore Responsabile',
-        'Email Operatore',
-        'Ultima Comunicazione',
-        'Stato Cliente'
-    ], ';');
+    // Genera come CSV ma con tab come separatore
+    echo "ID\tRagione Sociale\tCF/P.IVA\tEmail\tTelefono\tOperatore\tStato\n";
     
     foreach ($clienti as $cliente) {
-        fputcsv($output, [
+        $cf_piva = $cliente['codice_fiscale'] ?: $cliente['partita_iva'];
+        echo implode("\t", [
+            $cliente['id'],
             $cliente['ragione_sociale'],
-            ucfirst($cliente['tipologia_azienda']),
+            $cf_piva,
             $cliente['email'],
-            $cliente['pec'],
             $cliente['telefono'],
-            $cliente['cellulare'],
-            $cliente['indirizzo'],
-            $cliente['cap'],
-            $cliente['citta'],
-            $cliente['provincia'],
-            $cliente['operatore_responsabile_nome'],
-            $cliente['operatore_email'],
-            $cliente['ultima_comunicazione'] ? date('d/m/Y H:i', strtotime($cliente['ultima_comunicazione'])) : '',
-            $cliente['is_attivo'] ? 'Attivo' : 'Sospeso'
-        ], ';');
+            $cliente['operatore_nome'] ?: 'Non assegnato',
+            ucfirst($cliente['stato'])
+        ]) . "\n";
     }
-}
-
-/**
- * Genera export PDF (implementazione base)
- */
-function generatePDFExport($clienti, $pratiche, $template) {
-    $filename = 'export_clienti_' . date('Y-m-d_H-i-s') . '.html';
     
-    header('Content-Type: text/html; charset=utf-8');
-    header('Content-Disposition: attachment; filename="' . $filename . '"');
-    
-    echo generateHTMLReport($clienti, $pratiche, $template);
     exit;
 }
 
-/**
- * Genera report HTML per PDF
- */
-function generateHTMLReport($clienti, $pratiche, $template) {
-    $html = '<!DOCTYPE html>
-<html>
+function generatePDF($clienti, $template) {
+    // In produzione useresti TCPDF o simili
+    die('Export PDF non ancora implementato');
+}
+?>
+<!DOCTYPE html>
+<html lang="it">
 <head>
     <meta charset="UTF-8">
-    <title>Export Clienti CRM Re.De Consulting</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title><?= $pageTitle ?> - CRM Re.De</title>
+    
+    <!-- CSS nell'ordine corretto -->
+    <link rel="stylesheet" href="/crm/assets/css/design-system.css">
+    <link rel="stylesheet" href="/crm/assets/css/datev-style.css">
+    <link rel="stylesheet" href="/crm/assets/css/clienti.css">
+    
     <style>
-        body { font-family: Arial, sans-serif; font-size: 12px; }
-        table { width: 100%; border-collapse: collapse; margin-bottom: 20px; }
-        th, td { border: 1px solid #ddd; padding: 8px; text-align: left; }
-        th { background-color: #f2f2f2; font-weight: bold; }
-        .header { text-align: center; margin-bottom: 30px; }
-        .footer { text-align: center; margin-top: 30px; font-size: 10px; color: #666; }
-        .section-title { font-size: 16px; font-weight: bold; margin: 20px 0 10px 0; color: #2c6e49; }
-    </style>
-</head>
-<body>
-    <div class="header">
-        <h1>Export Clienti</h1>
-        <h2>CRM Re.De Consulting</h2>
-        <p>Generato il: ' . date('d/m/Y H:i') . '</p>
-        <p>Template: ' . ucfirst($template) . '</p>
-    </div>';
-    
-    $html .= '<div class="section-title">Dati Clienti (' . count($clienti) . ' totali)</div>';
-    $html .= '<table>';
-    $html .= '<tr>
-        <th>Ragione Sociale</th>
-        <th>CF/P.IVA</th>
-        <th>Tipologia</th>
-        <th>Contatti</th>
-        <th>Operatore</th>
-        <th>Stato</th>
-    </tr>';
-    
-    foreach ($clienti as $cliente) {
-        $html .= '<tr>';
-        $html .= '<td>' . htmlspecialchars($cliente['ragione_sociale']) . '</td>';
-        $html .= '<td>' . htmlspecialchars($cliente['codice_fiscale'] ?? $cliente['partita_iva'] ?? '-') . '</td>';
-        $html .= '<td>' . ucfirst($cliente['tipologia_azienda']) . '</td>';
-        $html .= '<td>' . htmlspecialchars($cliente['email'] ?? $cliente['telefono'] ?? '-') . '</td>';
-        $html .= '<td>' . htmlspecialchars($cliente['operatore_responsabile_nome'] ?? 'Non assegnato') . '</td>';
-        $html .= '<td>' . ($cliente['is_attivo'] ? 'Attivo' : 'Sospeso') . '</td>';
-        $html .= '</tr>';
-    }
-    
-    $html .= '</table>';
-    
-    if (!empty($pratiche) && ($template === 'completo' || $template === 'pratiche')) {
-        $html .= '<div class="section-title">Pratiche Associate (' . count($pratiche) . ' totali)</div>';
-        $html .= '<table>';
-        $html .= '<tr>
-            <th>Cliente</th>
-            <th>Pratica</th>
-            <th>Stato</th>
-            <th>Scadenza</th>
-            <th>Operatore</th>
-        </tr>';
-        
-        foreach ($pratiche as $pratica) {
-            $html .= '<tr>';
-            $html .= '<td>' . htmlspecialchars($pratica['cliente_nome']) . '</td>';
-            $html .= '<td>' . htmlspecialchars($pratica['titolo']) . '</td>';
-            $html .= '<td>' . ucfirst($pratica['stato']) . '</td>';
-            $html .= '<td>' . ($pratica['data_scadenza'] ? date('d/m/Y', strtotime($pratica['data_scadenza'])) : '-') . '</td>';
-            $html .= '<td>' . htmlspecialchars($pratica['operatore_nome'] ?? 'Non assegnato') . '</td>';
-            $html .= '</tr>';
+        .export-container {
+            padding: 2rem 1rem;
+            max-width: 1000px;
+            margin: 0 auto;
         }
         
-        $html .= '</table>';
-    }
-    
-    $html .= '<div class="footer">
-        <p>CRM Re.De Consulting - Export generato automaticamente</p>
-        <p>www.redeconsulting.eu</p>
+        .export-header {
+            background: white;
+            border-radius: var(--radius-lg);
+            padding: 2rem;
+            box-shadow: var(--shadow-md);
+            margin-bottom: 2rem;
+        }
+        
+        .export-title {
+            font-size: 1.5rem;
+            font-weight: 600;
+            color: var(--gray-900);
+            margin-bottom: 1rem;
+        }
+        
+        .export-description {
+            color: var(--gray-600);
+            font-size: 0.875rem;
+        }
+        
+        /* Layout due colonne */
+        .export-layout {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 2rem;
+        }
+        
+        @media (max-width: 768px) {
+            .export-layout {
+                grid-template-columns: 1fr;
+            }
+        }
+        
+        /* Sezioni */
+        .export-section {
+            background: white;
+            border-radius: var(--radius-lg);
+            box-shadow: var(--shadow-sm);
+            padding: 1.5rem;
+        }
+        
+        .section-title {
+            font-size: 1.125rem;
+            font-weight: 600;
+            color: var(--gray-800);
+            margin-bottom: 1rem;
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+        }
+        
+        /* Template cards */
+        .template-grid {
+            display: grid;
+            gap: 0.75rem;
+        }
+        
+        .template-card {
+            border: 2px solid var(--gray-200);
+            border-radius: var(--radius-md);
+            padding: 1rem;
+            cursor: pointer;
+            transition: all var(--transition-fast);
+        }
+        
+        .template-card:hover {
+            border-color: var(--primary-green);
+            background: var(--gray-50);
+        }
+        
+        .template-card input[type="radio"] {
+            display: none;
+        }
+        
+        .template-card input[type="radio"]:checked + label {
+            border-color: var(--primary-green);
+            background: rgba(0, 120, 73, 0.05);
+        }
+        
+        .template-card label {
+            display: block;
+            cursor: pointer;
+        }
+        
+        .template-name {
+            font-weight: 600;
+            color: var(--gray-900);
+            margin-bottom: 0.25rem;
+        }
+        
+        .template-desc {
+            font-size: 0.75rem;
+            color: var(--gray-600);
+        }
+        
+        /* Format cards */
+        .format-grid {
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+            gap: 0.75rem;
+        }
+        
+        .format-card {
+            text-align: center;
+            padding: 1rem;
+            border: 2px solid var(--gray-200);
+            border-radius: var(--radius-md);
+            cursor: pointer;
+            transition: all var(--transition-fast);
+        }
+        
+        .format-card:hover {
+            border-color: var(--primary-green);
+            background: var(--gray-50);
+        }
+        
+        .format-card input[type="radio"] {
+            display: none;
+        }
+        
+        .format-card input[type="radio"]:checked + label {
+            border-color: var(--primary-green);
+            background: rgba(0, 120, 73, 0.05);
+        }
+        
+        .format-card label {
+            display: block;
+            cursor: pointer;
+        }
+        
+        .format-icon {
+            font-size: 2rem;
+            margin-bottom: 0.5rem;
+        }
+        
+        .format-name {
+            font-size: 0.875rem;
+            font-weight: 500;
+            color: var(--gray-700);
+        }
+        
+        /* Clienti selezionati */
+        .clienti-list {
+            max-height: 200px;
+            overflow-y: auto;
+            border: 1px solid var(--gray-200);
+            border-radius: var(--radius-md);
+            padding: 0.5rem;
+        }
+        
+        .cliente-item {
+            padding: 0.5rem;
+            font-size: 0.875rem;
+            border-bottom: 1px solid var(--gray-100);
+        }
+        
+        .cliente-item:last-child {
+            border-bottom: none;
+        }
+        
+        /* Actions */
+        .export-actions {
+            margin-top: 2rem;
+            display: flex;
+            gap: 1rem;
+            justify-content: center;
+        }
+        
+        .btn {
+            padding: 0.75rem 2rem;
+            font-size: 0.875rem;
+            font-weight: 500;
+            border: none;
+            border-radius: var(--radius-md);
+            cursor: pointer;
+            transition: all var(--transition-fast);
+            text-decoration: none;
+            display: inline-flex;
+            align-items: center;
+            gap: 0.5rem;
+        }
+        
+        .btn-primary {
+            background: var(--primary-green);
+            color: white;
+        }
+        
+        .btn-primary:hover {
+            background: var(--primary-green-hover);
+            transform: translateY(-1px);
+        }
+        
+        .btn-secondary {
+            background: var(--gray-200);
+            color: var(--gray-700);
+        }
+        
+        .btn-secondary:hover {
+            background: var(--gray-300);
+        }
+        
+        /* Alert */
+        .alert {
+            padding: 1rem;
+            border-radius: var(--radius-md);
+            margin-bottom: 1rem;
+            font-size: 0.875rem;
+        }
+        
+        .alert-info {
+            background: var(--color-info-light);
+            color: var(--color-info);
+            border: 1px solid var(--color-info);
+        }
+        
+        /* Summary */
+        .export-summary {
+            background: var(--gray-50);
+            border-radius: var(--radius-md);
+            padding: 1rem;
+            margin-top: 1rem;
+        }
+        
+        .summary-item {
+            display: flex;
+            justify-content: space-between;
+            padding: 0.5rem 0;
+            font-size: 0.875rem;
+        }
+        
+        .summary-label {
+            color: var(--gray-600);
+        }
+        
+        .summary-value {
+            font-weight: 600;
+            color: var(--gray-900);
+        }
+    </style>
+</head>
+<body class="datev-compact">
+    <div class="app-layout">
+        <!-- ✅ COMPONENTE SIDEBAR (OBBLIGATORIO) -->
+        <?php include $_SERVER['DOCUMENT_ROOT'] . '/crm/components/navigation.php'; ?>
+        
+        <div class="content-wrapper">
+            <!-- ✅ COMPONENTE HEADER (OBBLIGATORIO) -->
+            <?php include $_SERVER['DOCUMENT_ROOT'] . '/crm/components/header.php'; ?>
+            
+            <main class="main-content">
+                <div class="export-container">
+                    <div class="export-header">
+                        <h1 class="export-title">📊 Export Dati Clienti</h1>
+                        <p class="export-description">
+                            Configura ed esporta i dati dei clienti in formato Excel, CSV o PDF per uso professionale e fiscale.
+                        </p>
+                    </div>
+                    
+                    <?php if (empty($clientiSelezionati) && !isset($_GET['all'])): ?>
+                        <div class="alert alert-info">
+                            ℹ️ Nessun cliente selezionato. 
+                            <a href="/crm/?action=clienti">Torna alla lista clienti</a> per selezionare i clienti da esportare.
+                        </div>
+                    <?php else: ?>
+                        <form id="exportForm">
+                            <input type="hidden" name="download" value="1">
+                            <?php if (isset($_GET['all'])): ?>
+                                <input type="hidden" name="all" value="1">
+                            <?php else: ?>
+                                <input type="hidden" name="ids" value="<?= htmlspecialchars(implode(',', $clienteIds)) ?>">
+                            <?php endif; ?>
+                            
+                            <div class="export-layout">
+                                <!-- Colonna sinistra -->
+                                <div>
+                                    <!-- Selezione template -->
+                                    <div class="export-section">
+                                        <h3 class="section-title">
+                                            📋 Seleziona Template
+                                        </h3>
+                                        <div class="template-grid">
+                                            <?php foreach ($templates as $key => $tmpl): ?>
+                                                <div class="template-card">
+                                                    <input type="radio" 
+                                                           id="template_<?= $key ?>" 
+                                                           name="template" 
+                                                           value="<?= $key ?>"
+                                                           <?= $template === $key ? 'checked' : '' ?>>
+                                                    <label for="template_<?= $key ?>">
+                                                        <div class="template-name"><?= $tmpl['label'] ?></div>
+                                                        <div class="template-desc"><?= $tmpl['description'] ?></div>
+                                                    </label>
+                                                </div>
+                                            <?php endforeach; ?>
+                                        </div>
+                                    </div>
+                                    
+                                    <!-- Selezione formato -->
+                                    <div class="export-section" style="margin-top: 1rem;">
+                                        <h3 class="section-title">
+                                            💾 Formato Export
+                                        </h3>
+                                        <div class="format-grid">
+                                            <?php foreach ($formati as $key => $fmt): ?>
+                                                <div class="format-card">
+                                                    <input type="radio" 
+                                                           id="format_<?= $key ?>" 
+                                                           name="type" 
+                                                           value="<?= $key ?>"
+                                                           <?= $exportType === $key ? 'checked' : '' ?>>
+                                                    <label for="format_<?= $key ?>">
+                                                        <div class="format-icon"><?= $fmt['icon'] ?></div>
+                                                        <div class="format-name"><?= $fmt['label'] ?></div>
+                                                    </label>
+                                                </div>
+                                            <?php endforeach; ?>
+                                        </div>
+                                    </div>
+                                </div>
+                                
+                                <!-- Colonna destra -->
+                                <div>
+                                    <!-- Clienti selezionati -->
+                                    <div class="export-section">
+                                        <h3 class="section-title">
+                                            🏢 Clienti da Esportare
+                                        </h3>
+                                        
+                                        <?php if (isset($_GET['all'])): ?>
+                                            <p>Verranno esportati <strong>TUTTI i clienti</strong> presenti nel database.</p>
+                                        <?php elseif (!empty($clientiSelezionati)): ?>
+                                            <div class="clienti-list">
+                                                <?php foreach ($clientiSelezionati as $cliente): ?>
+                                                    <div class="cliente-item">
+                                                        <strong><?= htmlspecialchars($cliente['ragione_sociale']) ?></strong><br>
+                                                        <?php if ($cliente['codice_fiscale']): ?>
+                                                            CF: <?= htmlspecialchars($cliente['codice_fiscale']) ?>
+                                                        <?php endif; ?>
+                                                        <?php if ($cliente['partita_iva']): ?>
+                                                            <?= $cliente['codice_fiscale'] ? ' | ' : '' ?>
+                                                            P.IVA: <?= htmlspecialchars($cliente['partita_iva']) ?>
+                                                        <?php endif; ?>
+                                                    </div>
+                                                <?php endforeach; ?>
+                                            </div>
+                                            <p style="margin-top: 0.5rem; font-size: 0.875rem; color: var(--gray-600);">
+                                                Totale: <strong><?= count($clientiSelezionati) ?></strong> clienti
+                                            </p>
+                                        <?php endif; ?>
+                                    </div>
+                                    
+                                    <!-- Riepilogo export -->
+                                    <div class="export-section" style="margin-top: 1rem;">
+                                        <h3 class="section-title">
+                                            📊 Riepilogo Export
+                                        </h3>
+                                        <div class="export-summary">
+                                            <div class="summary-item">
+                                                <span class="summary-label">Template:</span>
+                                                <span class="summary-value" id="summaryTemplate">Export Completo</span>
+                                            </div>
+                                            <div class="summary-item">
+                                                <span class="summary-label">Formato:</span>
+                                                <span class="summary-value" id="summaryFormat">Excel (.xlsx)</span>
+                                            </div>
+                                            <div class="summary-item">
+                                                <span class="summary-label">Numero record:</span>
+                                                <span class="summary-value">
+                                                    <?= isset($_GET['all']) ? 'Tutti' : count($clientiSelezionati) ?>
+                                                </span>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                            
+                            <!-- Azioni -->
+                            <div class="export-actions">
+                                <a href="/crm/?action=clienti" class="btn btn-secondary">
+                                    ← Torna alla lista
+                                </a>
+                                <button type="submit" class="btn btn-primary">
+                                    📥 Scarica Export
+                                </button>
+                            </div>
+                        </form>
+                    <?php endif; ?>
+                </div>
+            </main>
+        </div>
     </div>
-</body>
-</html>';
-    
-    return $html;
-}
 
-// Log dell'export per audit
-error_log("Export clienti eseguito da operatore " . $sessionInfo['user_id'] . " - Template: $template - Clienti: " . implode(',', $clienteIds));
-?>
+    <!-- Script per gestione form -->
+    <script>
+        // Aggiorna riepilogo quando cambiano le selezioni
+        document.addEventListener('DOMContentLoaded', function() {
+            const templateRadios = document.querySelectorAll('input[name="template"]');
+            const formatRadios = document.querySelectorAll('input[name="type"]');
+            
+            const templates = <?= json_encode($templates) ?>;
+            const formati = <?= json_encode($formati) ?>;
+            
+            function updateSummary() {
+                const selectedTemplate = document.querySelector('input[name="template"]:checked')?.value || 'completo';
+                const selectedFormat = document.querySelector('input[name="type"]:checked')?.value || 'excel';
+                
+                document.getElementById('summaryTemplate').textContent = templates[selectedTemplate].label.replace(/^[^\s]+ /, '');
+                document.getElementById('summaryFormat').textContent = formati[selectedFormat].label.replace(/^[^\s]+ /, '');
+            }
+            
+            templateRadios.forEach(radio => radio.addEventListener('change', updateSummary));
+            formatRadios.forEach(radio => radio.addEventListener('change', updateSummary));
+            
+            // Update iniziale
+            updateSummary();
+            
+            // Gestione submit form
+            document.getElementById('exportForm').addEventListener('submit', function(e) {
+                e.preventDefault();
+                
+                const formData = new FormData(this);
+                const params = new URLSearchParams(formData);
+                
+                window.location.href = '/crm/?action=clienti&view=export&' + params.toString();
+            });
+        });
+    </script>
+    
+    <!-- Script microinterazioni -->
+    <script src="/crm/assets/js/microinteractions.js"></script>
+</body>
+</html>

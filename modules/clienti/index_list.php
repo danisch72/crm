@@ -2,23 +2,14 @@
 /**
  * modules/clienti/index_list.php - Lista Clienti CRM Re.De Consulting
  * 
+ * ✅ VERSIONE CON SIDEBAR E HEADER CENTRALIZZATI
  * ✅ LAYOUT ULTRA-DENSO CONFORME AL DESIGN SYSTEM DATEV v2.0
  * 
  * Features:
- * - Layout tabellare 7-colonne enterprise-grade identico al modulo operatori
- * - Statistiche inline compatte (40px altezza)
- * - Micro-components ottimizzati (avatar 24px, bottoni 24px)
- * - Spacing ultra-compatto (-75% padding, -70% margin)
+ * - Sidebar e header componenti centralizzati
+ * - Layout tabellare 7-colonne enterprise-grade
  * - Design system Datev Koinos compliant
- * - Densità informazioni +300% vs layout standard
- * - Integrazione perfetta con sistema operatori esistente
- * 
- * 🔧 BUSINESS LOGIC COMMERCIALISTI:
- * - Validazione Codice Fiscale/Partita IVA italiana
- * - Categorizzazione automatica per tipologia cliente
- * - Integration con operatori responsabili
- * - Export dati per dichiarazioni fiscali
- * - Alert scadenze adempimenti
+ * - Business logic commercialisti integrata
  */
 
 // Avvia sessione se non già attiva
@@ -32,352 +23,308 @@ if (!defined('CLIENTI_ROUTER_LOADED')) {
     exit;
 }
 
-// Tutte le variabili sono già disponibili dal router:
-// $sessionInfo - info utente corrente
-// $db - istanza database
-// $error_message, $success_message, etc - messaggi flash
+// Variabili per i componenti
+$pageTitle = 'Gestione Clienti';
+$pageIcon = '🏢';
 
 // Verifica permessi amministratore per alcune azioni
 $isAdmin = $sessionInfo['is_admin'];
 
-// Gestione azioni AJAX
-if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
-    header('Content-Type: application/json');
-    
-    try {
-        switch ($_POST['action']) {
-            case 'toggle_status':
-                $clienteId = (int)$_POST['cliente_id'];
-                $newStatus = $_POST['status'] === 'attivo' ? 'attivo' : 'sospeso';
-                
-                $updated = $db->update('clienti', [
-                    'stato' => $newStatus,
-                    'updated_at' => date('Y-m-d H:i:s')
-                ], 'id = ?', [$clienteId]);
-                
-                echo json_encode([
-                    'success' => true, 
-                    'message' => "Stato cliente aggiornato a: $newStatus"
-                ]);
-                break;
-                
-            case 'assign_operator':
-                $clienteId = (int)$_POST['cliente_id'];
-                $operatoreId = (int)$_POST['operatore_id'];
-                
-                $updated = $db->update('clienti', [
-                    'operatore_responsabile_id' => $operatoreId,
-                    'updated_at' => date('Y-m-d H:i:s')
-                ], 'id = ?', [$clienteId]);
-                
-                echo json_encode([
-                    'success' => true, 
-                    'message' => "Operatore responsabile aggiornato"
-                ]);
-                break;
-                
-            case 'bulk_export':
-                $clienteIds = $_POST['cliente_ids'] ?? [];
-                
-                if (empty($clienteIds)) {
-                    throw new Exception('Nessun cliente selezionato per l\'export');
-                }
-                
-                // Qui implementeremo l'export Excel/CSV
-                echo json_encode([
-                    'success' => true, 
-                    'download_url' => '/crm/modules/clienti/export.php?ids=' . implode(',', $clienteIds)
-                ]);
-                break;
-                
-            default:
-                echo json_encode(['success' => false, 'message' => 'Azione non valida']);
-        }
-        exit;
-    } catch (Exception $e) {
-        echo json_encode(['success' => false, 'message' => $e->getMessage()]);
-        exit;
-    }
-}
-
 // Gestione filtri
 $search = $_GET['search'] ?? '';
-$stato = $_GET['stato'] ?? 'all';
+$status = $_GET['status'] ?? 'all';
 $tipologia = $_GET['tipologia'] ?? 'all';
 $operatore = $_GET['operatore'] ?? 'all';
 
-// Costruzione query con filtri
-$whereConditions = [];
-$params = [];
-
-if (!empty($search)) {
-    $whereConditions[] = "(c.ragione_sociale LIKE ? OR c.codice_fiscale LIKE ? OR c.partita_iva LIKE ? OR c.email LIKE ?)";
-    $searchParam = "%$search%";
-    $params[] = $searchParam;
-    $params[] = $searchParam;
-    $params[] = $searchParam;
-    $params[] = $searchParam;
+// Carica lista operatori per filtro
+$operatori = [];
+try {
+    $operatori = $db->select("
+        SELECT id, CONCAT(nome, ' ', cognome) as nome_completo
+        FROM operatori
+        WHERE is_attivo = 1
+        ORDER BY cognome, nome
+    ");
+} catch (Exception $e) {
+    error_log("Errore caricamento operatori: " . $e->getMessage());
 }
 
-if ($stato !== 'all') {
-    $whereConditions[] = "c.stato = ?";
-    $params[] = $stato;
+// Query clienti con filtri
+$whereConditions = ["1=1"];
+$params = [];
+
+if ($search) {
+    $whereConditions[] = "(
+        ragione_sociale LIKE ? OR 
+        codice_fiscale LIKE ? OR 
+        partita_iva LIKE ? OR
+        email LIKE ? OR
+        telefono LIKE ?
+    )";
+    $searchParam = '%' . $search . '%';
+    $params = array_merge($params, [$searchParam, $searchParam, $searchParam, $searchParam, $searchParam]);
+}
+
+if ($status !== 'all') {
+    $whereConditions[] = "stato = ?";
+    $params[] = $status;
 }
 
 if ($tipologia !== 'all') {
-    $whereConditions[] = "c.tipologia_azienda = ?";
+    $whereConditions[] = "tipologia_azienda = ?";
     $params[] = $tipologia;
 }
 
-if ($operatore !== 'all') {
-    $whereConditions[] = "c.operatore_responsabile_id = ?";
-    $params[] = (int)$operatore;
+if ($operatore !== 'all' && is_numeric($operatore)) {
+    $whereConditions[] = "operatore_responsabile_id = ?";
+    $params[] = $operatore;
 }
 
-$whereClause = !empty($whereConditions) ? 'WHERE ' . implode(' AND ', $whereConditions) : '';
+$whereClause = implode(' AND ', $whereConditions);
 
-// Query principale clienti con join per operatore responsabile
+// Carica clienti
 try {
     $clienti = $db->select("
         SELECT 
             c.*,
-            CONCAT(o.nome, ' ', o.cognome) as operatore_responsabile_nome,
-            o.email as operatore_email,
-            o.is_attivo as operatore_attivo,
-            
-            -- Conteggio pratiche associate (placeholder)
-            0 as totale_pratiche,
-            0 as pratiche_attive,
-            
-            -- Ultima comunicazione (se tabella esiste)
-            NULL as ultima_comunicazione,
-            
-            -- Prossima scadenza (placeholder)
-            NULL as prossima_scadenza
-            
+            CONCAT(o.nome, ' ', o.cognome) as operatore_nome,
+            (SELECT COUNT(*) FROM pratiche WHERE cliente_id = c.id) as totale_pratiche,
+            (SELECT COUNT(*) FROM pratiche WHERE cliente_id = c.id AND stato = 'attiva') as pratiche_attive,
+            (SELECT MAX(created_at) FROM comunicazioni_clienti WHERE cliente_id = c.id) as ultima_comunicazione
         FROM clienti c
         LEFT JOIN operatori o ON c.operatore_responsabile_id = o.id
-        $whereClause
-        ORDER BY 
-            CASE c.stato
-                WHEN 'attivo' THEN 1
-                WHEN 'sospeso' THEN 2
-                WHEN 'chiuso' THEN 3
-            END,
-            c.ragione_sociale ASC
+        WHERE $whereClause
+        ORDER BY c.ragione_sociale ASC
     ", $params);
-
-    // Statistiche generali
-    $statsGenerali = $db->selectOne("
-        SELECT 
-            COUNT(*) as totale,
-            SUM(CASE WHEN stato = 'attivo' THEN 1 ELSE 0 END) as attivi,
-            SUM(CASE WHEN stato = 'sospeso' THEN 1 ELSE 0 END) as sospesi,
-            SUM(CASE WHEN stato = 'chiuso' THEN 1 ELSE 0 END) as chiusi,
-            SUM(CASE WHEN tipologia_azienda = 'individuale' THEN 1 ELSE 0 END) as individuali,
-            SUM(CASE WHEN tipologia_azienda IN ('srl', 'spa') THEN 1 ELSE 0 END) as societa,
-            COUNT(CASE WHEN operatore_responsabile_id IS NULL THEN 1 END) as non_assegnati
-        FROM clienti
-        $whereClause
-    ", $params) ?: [
-        'totale' => 0, 'attivi' => 0, 'sospesi' => 0, 'chiusi' => 0,
-        'individuali' => 0, 'societa' => 0, 'non_assegnati' => 0
-    ];
-
-    // Lista operatori per filtri e assegnazioni
-    $operatori = $db->select("
-        SELECT id, CONCAT(nome, ' ', cognome) as nome_completo, is_attivo 
-        FROM operatori 
-        WHERE is_attivo = 1 
-        ORDER BY nome, cognome
-    ");
-
 } catch (Exception $e) {
-    error_log("Clienti index error: " . $e->getMessage());
+    error_log("Errore caricamento clienti: " . $e->getMessage());
     $clienti = [];
-    $statsGenerali = ['totale' => 0, 'attivi' => 0, 'sospesi' => 0, 'chiusi' => 0, 'individuali' => 0, 'societa' => 0, 'non_assegnati' => 0];
-    $operatori = [];
 }
 
-// Funzioni helper per la vista
-function formatDataContatto($data) {
-    if (!$data) return '-';
-    try {
-        $diff = time() - strtotime($data);
-        if ($diff < 3600) return floor($diff/60) . 'm';
-        if ($diff < 86400) return floor($diff/3600) . 'h';
-        if ($diff < 604800) return floor($diff/86400) . 'd';
-        return date('d/m', strtotime($data));
-    } catch (Exception $e) {
-        return '-';
-    }
-}
-
-function getStatusIcon($stato) {
-    switch ($stato) {
-        case 'attivo': return '🟢';
-        case 'sospeso': return '🟡';
-        case 'chiuso': return '🔴';
-        default: return '⚪';
-    }
-}
-
+// Funzioni helper
 function getTipologiaIcon($tipologia) {
-    switch ($tipologia) {
-        case 'individuale': return '👤';
-        case 'srl': return '🏢';
-        case 'spa': return '🏭';
-        case 'snc': return '👥';
-        case 'sas': return '🤝';
-        default: return '📋';
-    }
+    $icons = [
+        'individuale' => '👤',
+        'srl' => '🏢',
+        'spa' => '🏛️',
+        'snc' => '🤝',
+        'sas' => '🏪'
+    ];
+    return $icons[$tipologia] ?? '🏢';
+}
+
+function getStatusIcon($status) {
+    return $status === 'attivo' ? '✅' : '⚠️';
+}
+
+function formatDataContatto($data) {
+    if (!$data) return 'Mai';
+    $date = new DateTime($data);
+    $now = new DateTime();
+    $diff = $now->diff($date);
+    
+    if ($diff->days == 0) return 'Oggi';
+    if ($diff->days == 1) return 'Ieri';
+    if ($diff->days < 7) return $diff->days . ' giorni fa';
+    if ($diff->days < 30) return floor($diff->days / 7) . ' settimane fa';
+    if ($diff->days < 365) return floor($diff->days / 30) . ' mesi fa';
+    return 'Oltre un anno fa';
 }
 ?>
-
 <!DOCTYPE html>
 <html lang="it">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>👥 Gestione Clienti - CRM Re.De Consulting</title>
+    <title><?= $pageTitle ?> - CRM Re.De</title>
     
-    <!-- Design System Datev Ultra-Denso -->
+    <!-- CSS nell'ordine corretto -->
+    <link rel="stylesheet" href="/crm/assets/css/design-system.css">
     <link rel="stylesheet" href="/crm/assets/css/datev-style.css">
-    <link rel="stylesheet" href="/crm/assets/css/responsive.css">
+    <link rel="stylesheet" href="/crm/assets/css/clienti.css">
     
-    <!-- Layout Ultra-Denso Specifico Clienti -->
     <style>
-        /* Layout Ultra-Denso Enterprise IDENTICO al modulo operatori */
-        .stats-inline {
+        /* Container principale con padding professionale */
+        .clienti-container {
+            padding: 1.5rem;
+            background: #f9fafb;
+            min-height: calc(100vh - 64px);
+        }
+        
+        .filters-section {
+            background: white;
+            padding: 1rem 1.5rem;
+            border-radius: 8px;
+            margin-bottom: 1.5rem;
+            box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+            border: 1px solid #e5e7eb;
+        }
+        
+        .filters-form {
             display: flex;
             gap: 0.75rem;
-            margin-bottom: 0.5rem;
-            flex-wrap: wrap;
-            padding: 0.5rem 0;
-        }
-        
-        .stat-compact {
-            background: var(--gray-50);
-            border: 1px solid var(--gray-200);
-            border-radius: var(--radius-md);
-            padding: 0.5rem 0.75rem;
-            height: 40px;
-            display: flex;
             align-items: center;
-            gap: 0.5rem;
-            font-size: 0.875rem;
+            flex-wrap: wrap;
+        }
+        
+        .form-input-compact {
+            padding: 0.5rem 0.75rem;
+            font-size: 0.8125rem;
+            border: 1px solid #e5e7eb;
+            border-radius: 6px;
+            min-width: 140px;
+            background: #ffffff;
+            transition: all 0.2s;
+        }
+        
+        .form-input-compact:focus {
+            outline: none;
+            border-color: #007849;
+            box-shadow: 0 0 0 3px rgba(0, 120, 73, 0.1);
+        }
+        
+        .btn-primary-compact, .btn-secondary-compact {
+            padding: 0.5rem 1rem;
+            font-size: 0.8125rem;
+            border-radius: 6px;
             font-weight: 500;
-            color: var(--gray-700);
-            transition: all var(--transition-fast);
+            cursor: pointer;
+            transition: all 0.2s;
+            border: none;
+            white-space: nowrap;
         }
         
-        .stat-compact:hover {
-            background: var(--gray-100);
-            border-color: var(--gray-300);
+        .btn-primary-compact {
+            background: #007849;
+            color: white;
         }
         
-        .stat-icon {
-            font-size: 1rem;
+        .btn-primary-compact:hover {
+            background: #005a37;
+            transform: translateY(-1px);
+            box-shadow: 0 4px 6px rgba(0, 120, 73, 0.2);
         }
         
-        /* Layout Tabellare 7-Colonne Ultra-Denso per Clienti */
+        .btn-secondary-compact {
+            background: #ffffff;
+            color: #4b5563;
+            border: 1px solid #e5e7eb;
+        }
+        
+        .btn-secondary-compact:hover {
+            background: #f9fafb;
+            border-color: #d1d5db;
+        }
+        
+        /* Tabella professionale con layout ottimizzato */
         .clienti-table {
             background: white;
-            border-radius: var(--radius-lg);
+            border-radius: 8px;
             overflow: hidden;
-            box-shadow: var(--shadow-sm);
-            border: 1px solid var(--gray-200);
+            box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+            border: 1px solid #e5e7eb;
         }
         
         .table-header {
             display: grid;
-            grid-template-columns: 240px 180px 120px 90px 100px 120px auto;
-            gap: 0.5rem;
-            padding: 0.5rem;
-            background: var(--gray-50);
-            border-bottom: 2px solid var(--gray-200);
+            grid-template-columns: 
+                minmax(250px, 2fr)  /* Cliente */
+                minmax(200px, 1.5fr) /* Contatti */
+                120px               /* Tipologia */
+                100px               /* Stato */
+                120px               /* Pratiche */
+                minmax(150px, 1fr)  /* Operatore */
+                140px;              /* Azioni */
+            gap: 1rem;
+            padding: 1rem 1.5rem;
+            background: #f9fafb;
+            border-bottom: 2px solid #e5e7eb;
             font-size: 0.75rem;
             font-weight: 600;
-            color: var(--gray-700);
+            color: #6b7280;
             text-transform: uppercase;
             letter-spacing: 0.05em;
         }
         
         .cliente-row {
             display: grid;
-            grid-template-columns: 240px 180px 120px 90px 100px 120px auto;
-            gap: 0.5rem;
-            padding: 0.75rem 0.5rem;
-            border-bottom: 1px solid var(--gray-100);
+            grid-template-columns: 
+                minmax(250px, 2fr)
+                minmax(200px, 1.5fr)
+                120px
+                100px
+                120px
+                minmax(150px, 1fr)
+                140px;
+            gap: 1rem;
+            padding: 1rem 1.5rem;
+            border-bottom: 1px solid #f3f4f6;
             align-items: center;
-            transition: all var(--transition-fast);
-            font-size: 0.875rem;
+            transition: all 0.2s;
+            font-size: 0.8125rem;
         }
         
         .cliente-row:hover {
-            background: var(--gray-50);
+            background: #f9fafb;
         }
         
+        /* Info cliente compatte */
         .cliente-info {
-            display: flex;
-            flex-direction: column;
-            gap: 0.25rem;
+            min-width: 0; /* Permette text truncation */
         }
         
         .cliente-nome {
             font-weight: 600;
-            color: var(--gray-900);
+            color: #1f2937;
             font-size: 0.875rem;
-            line-height: 1.2;
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+            margin-bottom: 0.25rem;
         }
         
         .cliente-dettagli {
             font-size: 0.75rem;
-            color: var(--gray-600);
-            line-height: 1.1;
+            color: #6b7280;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
         }
         
+        /* Contatti ben organizzati */
         .contatti-info {
             display: flex;
             flex-direction: column;
-            gap: 0.2rem;
+            gap: 0.25rem;
             font-size: 0.75rem;
+            min-width: 0;
         }
         
-        .operatore-badge {
-            background: var(--primary-green);
-            color: white;
-            padding: 0.2rem 0.5rem;
-            border-radius: var(--radius-md);
-            font-size: 0.7rem;
-            font-weight: 500;
-            display: inline-block;
-            max-width: 100%;
+        .contatti-info > div {
+            white-space: nowrap;
             overflow: hidden;
             text-overflow: ellipsis;
+        }
+        
+        /* Stati e badge professionali */
+        .stato-badge {
+            padding: 0.25rem 0.75rem;
+            border-radius: 9999px;
+            font-size: 0.75rem;
+            font-weight: 500;
+            display: inline-flex;
+            align-items: center;
+            gap: 0.375rem;
             white-space: nowrap;
         }
         
-        .operatore-badge.non-assegnato {
-            background: var(--gray-400);
-        }
-        
-        .stato-badge {
-            padding: 0.3rem 0.6rem;
-            border-radius: var(--radius-md);
-            font-size: 0.7rem;
-            font-weight: 600;
-            text-align: center;
-            min-width: 60px;
-        }
-        
         .stato-attivo {
-            background: #dcfce7;
-            color: #166534;
+            background: #d1fae5;
+            color: #065f46;
         }
         
         .stato-sospeso {
-            background: #fef3c7;
+            background: #fed7aa;
             color: #92400e;
         }
         
@@ -386,453 +333,264 @@ function getTipologiaIcon($tipologia) {
             color: #991b1b;
         }
         
-        .pratiche-summary {
-            display: flex;
-            flex-direction: column;
-            gap: 0.1rem;
-            font-size: 0.75rem;
+        .tipologia-badge {
+            background: #f3f4f6;
+            color: #1f2937;
+            padding: 0.25rem 0.75rem;
+            border-radius: 6px;
+            font-size: 0.7rem;
+            font-weight: 600;
             text-align: center;
         }
         
-        .actions-compact {
-            display: flex;
-            gap: 0.25rem;
-            justify-content: flex-end;
-            align-items: center;
-        }
-        
-        .btn-micro {
-            width: 24px;
-            height: 24px;
-            border: none;
-            border-radius: var(--radius-md);
-            cursor: pointer;
-            display: flex;
-            align-items: center;
-            justify-content: center;
+        /* Operatore badge */
+        .operatore-badge {
+            background: #e0f2fe;
+            color: #075985;
+            padding: 0.25rem 0.75rem;
+            border-radius: 6px;
             font-size: 0.75rem;
-            transition: all var(--transition-fast);
+            font-weight: 500;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            max-width: 100%;
         }
         
-        .btn-view {
-            background: var(--accent-blue);
-            color: white;
+        /* Pratiche summary */
+        .pratiche-summary {
+            text-align: center;
         }
         
-        .btn-edit {
-            background: var(--warning-yellow);
-            color: white;
+        .pratiche-summary > div:first-child {
+            font-weight: 600;
+            color: #1f2937;
         }
         
-        .btn-status {
-            background: var(--gray-200);
-            color: var(--gray-700);
+        /* Azioni row professionali */
+        .row-actions {
+            display: flex;
+            gap: 0.5rem;
+            justify-content: flex-start;
         }
         
-        .btn-micro:hover {
-            transform: scale(1.1);
-        }
-        
-        /* Filtri Compatti */
-        .filters-section {
+        .btn-action {
+            padding: 0.375rem 0.75rem;
+            font-size: 0.75rem;
+            border-radius: 6px;
+            border: 1px solid #e5e7eb;
             background: white;
-            padding: 0.75rem;
-            border-radius: var(--radius-lg);
-            margin-bottom: 0.5rem;
-            box-shadow: var(--shadow-sm);
-            border: 1px solid var(--gray-200);
-        }
-        
-        .filters-grid {
-            display: grid;
-            grid-template-columns: 2fr 1fr 1fr 1fr auto auto;
-            gap: 0.75rem;
-            align-items: end;
-        }
-        
-        .form-input-compact {
-            height: 32px;
-            padding: 0.25rem 0.5rem;
-            border: 1px solid var(--gray-300);
-            border-radius: var(--radius-md);
-            font-size: 0.875rem;
-        }
-        
-        .btn-primary-compact {
-            height: 32px;
-            padding: 0.25rem 0.75rem;
-            background: var(--primary-green);
-            color: white;
-            border: none;
-            border-radius: var(--radius-md);
-            font-size: 0.875rem;
-            font-weight: 500;
+            color: #4b5563;
             cursor: pointer;
-            transition: all var(--transition-fast);
-        }
-        
-        .btn-primary-compact:hover {
-            background: var(--secondary-green);
-        }
-        
-        .btn-secondary-compact {
-            height: 32px;
-            padding: 0.25rem 0.75rem;
-            background: var(--gray-200);
-            color: var(--gray-700);
-            border: none;
-            border-radius: var(--radius-md);
-            font-size: 0.875rem;
-            font-weight: 500;
-            cursor: pointer;
-            transition: all var(--transition-fast);
+            transition: all 0.2s;
             text-decoration: none;
             display: inline-flex;
             align-items: center;
-            gap: 0.25rem;
+            gap: 0.375rem;
+            white-space: nowrap;
         }
         
-        .btn-secondary-compact:hover {
-            background: var(--gray-300);
-        }
-        
-        /* Responsive per mobile */
-        @media (max-width: 768px) {
-            .table-header,
-            .cliente-row {
-                grid-template-columns: 1fr;
-                grid-template-rows: auto;
-            }
-            
-            .filters-grid {
-                grid-template-columns: 1fr;
-                gap: 0.5rem;
-            }
-            
-            .stats-inline {
-                justify-content: center;
-            }
+        .btn-action:hover {
+            border-color: #007849;
+            color: #007849;
+            background: #f0fdf4;
         }
     </style>
 </head>
 <body>
-    <!-- Sidebar uniforme identica al modulo operatori -->
-    <div class="sidebar">
-        <div class="sidebar-header">
-            <h2>📊 CRM</h2>
+    <!-- ✅ COMPONENTE SIDEBAR (OBBLIGATORIO) -->
+    <?php include $_SERVER['DOCUMENT_ROOT'] . '/crm/components/navigation.php'; ?>
+    
+    <!-- ✅ COMPONENTE HEADER (OBBLIGATORIO) -->
+    <?php include $_SERVER['DOCUMENT_ROOT'] . '/crm/components/header.php'; ?>
+    
+    <!-- Content Wrapper con padding top per header -->
+    <div class="content-wrapper">
+            
+            <main class="main-content">
+                <div class="clienti-container">
+                    <!-- Messaggi -->
+                    <?php if ($error_message): ?>
+                        <div class="alert alert-danger"><?= $error_message ?></div>
+                    <?php endif; ?>
+                    
+                    <?php if ($success_message): ?>
+                        <div class="alert alert-success"><?= $success_message ?></div>
+                    <?php endif; ?>
+                    
+                    <!-- Filtri -->
+                    <div class="filters-section">
+                        <form method="GET" class="filters-form">
+                            <input type="hidden" name="action" value="clienti">
+                            
+                            <input type="text" 
+                                   name="search" 
+                                   placeholder="🔍 Cerca cliente..." 
+                                   value="<?= htmlspecialchars($search) ?>"
+                                   class="form-input-compact" 
+                                   style="flex: 1; max-width: 300px;">
+                            
+                            <select name="status" class="form-input-compact">
+                                <option value="all">Tutti gli stati</option>
+                                <option value="attivo" <?= $status === 'attivo' ? 'selected' : '' ?>>✅ Attivi</option>
+                                <option value="sospeso" <?= $status === 'sospeso' ? 'selected' : '' ?>>⚠️ Sospesi</option>
+                                <option value="chiuso" <?= $status === 'chiuso' ? 'selected' : '' ?>>🔴 Chiusi</option>
+                            </select>
+                            
+                            <select name="tipologia" class="form-input-compact">
+                                <option value="all">Tutte le tipologie</option>
+                                <option value="individuale" <?= $tipologia === 'individuale' ? 'selected' : '' ?>>👤 Individuale</option>
+                                <option value="srl" <?= $tipologia === 'srl' ? 'selected' : '' ?>>🏢 SRL</option>
+                                <option value="spa" <?= $tipologia === 'spa' ? 'selected' : '' ?>>🏭 SPA</option>
+                                <option value="snc" <?= $tipologia === 'snc' ? 'selected' : '' ?>>👥 SNC</option>
+                                <option value="sas" <?= $tipologia === 'sas' ? 'selected' : '' ?>>🤝 SAS</option>
+                            </select>
+                            
+                            <select name="operatore" class="form-input-compact">
+                                <option value="all">Tutti gli operatori</option>
+                                <?php foreach ($operatori as $op): ?>
+                                    <option value="<?= $op['id'] ?>" <?= $operatore == $op['id'] ? 'selected' : '' ?>>
+                                        <?= htmlspecialchars($op['nome_completo']) ?>
+                                    </option>
+                                <?php endforeach; ?>
+                            </select>
+                            
+                            <button type="submit" class="btn-primary-compact">Filtra</button>
+                            <a href="/crm/?action=clienti" class="btn-secondary-compact">Reset</a>
+                            
+                            <?php if ($isAdmin): ?>
+                                <a href="/crm/?action=clienti&view=create" class="btn-primary-compact" style="margin-left: auto;">
+                                    ➕ Nuovo Cliente
+                                </a>
+                            <?php endif; ?>
+                        </form>
+                    </div>
+
+                    <!-- Tabella Clienti -->
+                    <div class="clienti-table">
+                        <div class="table-header">
+                            <div>Cliente</div>
+                            <div>Contatti</div>
+                            <div>Tipologia</div>
+                            <div>Stato</div>
+                            <div>Pratiche</div>
+                            <div>Operatore</div>
+                            <div>Azioni</div>
+                        </div>
+
+                        <?php if (empty($clienti)): ?>
+                            <div style="padding: 2rem; text-align: center; color: var(--gray-500);">
+                                <p>🔍 Nessun cliente trovato con i filtri attuali</p>
+                                <?php if ($isAdmin): ?>
+                                    <a href="/crm/?action=clienti&view=create" class="btn-primary-compact" style="margin-top: 1rem;">
+                                        ➕ Aggiungi il primo cliente
+                                    </a>
+                                <?php endif; ?>
+                            </div>
+                        <?php else: ?>
+                            <?php foreach ($clienti as $cliente): ?>
+                                <div class="cliente-row" data-cliente-id="<?= $cliente['id'] ?>">
+                                    <!-- Cliente Info -->
+                                    <div class="cliente-info">
+                                        <div class="cliente-nome">
+                                            <?= getTipologiaIcon($cliente['tipologia_azienda']) ?>
+                                            <?= htmlspecialchars($cliente['ragione_sociale']) ?>
+                                        </div>
+                                        <div class="cliente-dettagli">
+                                            <?php if ($cliente['codice_fiscale']): ?>
+                                                CF: <?= htmlspecialchars($cliente['codice_fiscale']) ?>
+                                            <?php endif; ?>
+                                            <?php if ($cliente['partita_iva']): ?>
+                                                | P.IVA: <?= htmlspecialchars($cliente['partita_iva']) ?>
+                                            <?php endif; ?>
+                                        </div>
+                                    </div>
+
+                                    <!-- Contatti -->
+                                    <div class="contatti-info">
+                                        <?php if ($cliente['email']): ?>
+                                            <div>📧 <?= htmlspecialchars($cliente['email']) ?></div>
+                                        <?php endif; ?>
+                                        <?php if ($cliente['telefono']): ?>
+                                            <div>📞 <?= htmlspecialchars($cliente['telefono']) ?></div>
+                                        <?php endif; ?>
+                                        <?php if ($cliente['ultima_comunicazione']): ?>
+                                            <div style="color: var(--gray-500); font-size: 0.7rem;">
+                                                💬 <?= formatDataContatto($cliente['ultima_comunicazione']) ?>
+                                            </div>
+                                        <?php endif; ?>
+                                    </div>
+
+                                    <!-- Tipologia -->
+                                    <div style="text-align: center;">
+                                        <span class="tipologia-badge">
+                                            <?= strtoupper($cliente['tipologia_azienda'] ?? 'N/A') ?>
+                                        </span>
+                                    </div>
+
+                                    <!-- Stato -->
+                                    <div>
+                                        <span class="stato-badge stato-<?= $cliente['stato'] ?>">
+                                            <?= getStatusIcon($cliente['stato']) ?> 
+                                            <?= ucfirst($cliente['stato']) ?>
+                                        </span>
+                                    </div>
+
+                                    <!-- Pratiche -->
+                                    <div class="pratiche-summary">
+                                        <div><strong><?= $cliente['totale_pratiche'] ?? 0 ?></strong> totali</div>
+                                        <?php if ($cliente['pratiche_attive'] > 0): ?>
+                                            <div style="color: var(--color-success); font-size: 0.75rem;">
+                                                <?= $cliente['pratiche_attive'] ?> attive
+                                            </div>
+                                        <?php endif; ?>
+                                    </div>
+
+                                    <!-- Operatore -->
+                                    <div>
+                                        <?php if ($cliente['operatore_nome']): ?>
+                                            <span class="operatore-badge">
+                                                <?= htmlspecialchars($cliente['operatore_nome']) ?>
+                                            </span>
+                                        <?php else: ?>
+                                            <span style="color: var(--gray-400); font-size: 0.75rem;">
+                                                Non assegnato
+                                            </span>
+                                        <?php endif; ?>
+                                    </div>
+
+                                    <!-- Azioni -->
+                                    <div class="row-actions">
+                                        <a href="/crm/?action=clienti&view=view&id=<?= $cliente['id'] ?>" 
+                                           class="btn-action" 
+                                           title="Visualizza">
+                                            👁️ Vedi
+                                        </a>
+                                        
+                                        <?php if ($isAdmin || $cliente['operatore_responsabile_id'] == $sessionInfo['operatore_id']): ?>
+                                            <a href="/crm/?action=clienti&view=edit&id=<?= $cliente['id'] ?>" 
+                                               class="btn-action" 
+                                               title="Modifica">
+                                                ✏️ Modifica
+                                            </a>
+                                        <?php endif; ?>
+                                        
+                                        <a href="/crm/?action=clienti&view=documenti&id=<?= $cliente['id'] ?>" 
+                                           class="btn-action" 
+                                           title="Documenti">
+                                            📁 Docs
+                                        </a>
+                                    </div>
+                                </div>
+                            <?php endforeach; ?>
+                        <?php endif; ?>
+                    </div>
+                </div>
+            </main>
         </div>
-        
-        <nav class="nav">
-            <div class="nav-section">
-                <div class="nav-item">
-                    <a href="/crm/dashboard.php" class="nav-link">
-                        <span>🏠</span> Dashboard
-                    </a>
-                </div>
-                <div class="nav-item">
-                    <a href="/crm/modules/operatori/index.php" class="nav-link">
-                        <span>👥</span> Operatori
-                    </a>
-                </div>
-                <div class="nav-item">
-                    <a href="/crm/modules/clienti/index.php" class="nav-link nav-link-active">
-                        <span>🏢</span> Clienti
-                    </a>
-                </div>
-                <div class="nav-item">
-                    <a href="/crm/modules/pratiche/index.php" class="nav-link">
-                        <span>📋</span> Pratiche
-                    </a>
-                </div>
-                <div class="nav-item">
-                    <a href="/crm/modules/scadenze/index.php" class="nav-link">
-                        <span>⏰</span> Scadenze
-                    </a>
-                </div>
-            </div>
-        </nav>
     </div>
 
-    <!-- Main Content -->
-    <main class="main-content">
-        <!-- Header Section -->
-        <div class="main-header">
-            <div class="header-title">
-                <h1>👥 Gestione Clienti</h1>
-                <p class="header-subtitle">Portfolio clienti studio commercialista</p>
-            </div>
-            
-            <div class="header-actions">
-                <?php if ($isAdmin): ?>
-                <a href="/crm/?action=clienti&view=stats" class="btn-secondary-compact">
-                    📊 Statistiche
-                </a>
-                <?php endif; ?>
-                <a href="/crm/?action=clienti&view=create" class="btn-primary-compact">
-                    ➕ Nuovo Cliente
-                </a>
-            </div>
-        </div>
-
-        <!-- Statistiche Inline Ultra-Compatte -->
-        <div class="stats-inline">
-            <div class="stat-compact">
-                <span class="stat-icon">📊</span>
-                <span>Totale: <strong><?= number_format($statsGenerali['totale']) ?></strong></span>
-            </div>
-            <div class="stat-compact">
-                <span class="stat-icon">🟢</span>
-                <span>Attivi: <strong><?= number_format($statsGenerali['attivi']) ?></strong></span>
-            </div>
-            <div class="stat-compact">
-                <span class="stat-icon">🟡</span>
-                <span>Sospesi: <strong><?= number_format($statsGenerali['sospesi']) ?></strong></span>
-            </div>
-            <div class="stat-compact">
-                <span class="stat-icon">👤</span>
-                <span>Individuali: <strong><?= number_format($statsGenerali['individuali']) ?></strong></span>
-            </div>
-            <div class="stat-compact">
-                <span class="stat-icon">🏢</span>
-                <span>Società: <strong><?= number_format($statsGenerali['societa']) ?></strong></span>
-            </div>
-            <div class="stat-compact">
-                <span class="stat-icon">⚠️</span>
-                <span>Non assegnati: <strong><?= number_format($statsGenerali['non_assegnati']) ?></strong></span>
-            </div>
-        </div>
-
-        <!-- Filtri Compatti -->
-        <div class="filters-section">
-            <form method="GET" class="filters-grid" action="/crm/">
-                <input type="hidden" name="action" value="clienti">
-                <input type="text" name="search" value="<?= htmlspecialchars($search) ?>" 
-                       placeholder="🔍 Cerca per nome, CF, P.IVA..." class="form-input-compact">
-                
-                <select name="stato" class="form-input-compact">
-                    <option value="all" <?= $stato === 'all' ? 'selected' : '' ?>>Tutti gli stati</option>
-                    <option value="attivo" <?= $stato === 'attivo' ? 'selected' : '' ?>>🟢 Attivi</option>
-                    <option value="sospeso" <?= $stato === 'sospeso' ? 'selected' : '' ?>>🟡 Sospesi</option>
-                    <option value="chiuso" <?= $stato === 'chiuso' ? 'selected' : '' ?>>🔴 Chiusi</option>
-                </select>
-                
-                <select name="tipologia" class="form-input-compact">
-                    <option value="all" <?= $tipologia === 'all' ? 'selected' : '' ?>>Tutte le tipologie</option>
-                    <option value="individuale" <?= $tipologia === 'individuale' ? 'selected' : '' ?>>👤 Individuale</option>
-                    <option value="srl" <?= $tipologia === 'srl' ? 'selected' : '' ?>>🏢 SRL</option>
-                    <option value="spa" <?= $tipologia === 'spa' ? 'selected' : '' ?>>🏭 SPA</option>
-                    <option value="snc" <?= $tipologia === 'snc' ? 'selected' : '' ?>>👥 SNC</option>
-                    <option value="sas" <?= $tipologia === 'sas' ? 'selected' : '' ?>>🤝 SAS</option>
-                </select>
-                
-                <select name="operatore" class="form-input-compact">
-                    <option value="all" <?= $operatore === 'all' ? 'selected' : '' ?>>Tutti gli operatori</option>
-                    <?php foreach ($operatori as $op): ?>
-                        <option value="<?= $op['id'] ?>" <?= $operatore == $op['id'] ? 'selected' : '' ?>>
-                            <?= htmlspecialchars($op['nome_completo']) ?>
-                        </option>
-                    <?php endforeach; ?>
-                </select>
-                
-                <button type="submit" class="btn-primary-compact">Filtra</button>
-                <a href="/crm/?action=clienti" class="btn-secondary-compact">Reset</a>
-            </form>
-        </div>
-
-        <!-- Tabella Clienti Ultra-Densa -->
-        <div class="clienti-table">
-            <!-- Header -->
-            <div class="table-header">
-                <div>Cliente</div>
-                <div>Contatti</div>
-                <div>Tipologia</div>
-                <div>Stato</div>
-                <div>Pratiche</div>
-                <div>Operatore</div>
-                <div>Azioni</div>
-            </div>
-
-            <!-- Righe Clienti -->
-            <?php if (empty($clienti)): ?>
-                <div style="padding: 2rem; text-align: center; color: var(--gray-500);">
-                    <p>🔍 Nessun cliente trovato con i filtri attuali</p>
-                    <a href="/crm/?action=clienti&view=create" class="btn-primary-compact" style="margin-top: 1rem;">
-                        ➕ Aggiungi il primo cliente
-                    </a>
-                </div>
-            <?php else: ?>
-                <?php foreach ($clienti as $cliente): ?>
-                    <div class="cliente-row" data-cliente-id="<?= $cliente['id'] ?>">
-                        <!-- Cliente Info -->
-                        <div class="cliente-info">
-                            <div class="cliente-nome">
-                                <?= getTipologiaIcon($cliente['tipologia_azienda']) ?>
-                                <?= htmlspecialchars($cliente['ragione_sociale']) ?>
-                            </div>
-                            <div class="cliente-dettagli">
-                                <?php if ($cliente['codice_fiscale']): ?>
-                                    CF: <?= htmlspecialchars($cliente['codice_fiscale']) ?>
-                                <?php endif; ?>
-                                <?php if ($cliente['partita_iva']): ?>
-                                    | P.IVA: <?= htmlspecialchars($cliente['partita_iva']) ?>
-                                <?php endif; ?>
-                            </div>
-                        </div>
-
-                        <!-- Contatti -->
-                        <div class="contatti-info">
-                            <?php if ($cliente['email']): ?>
-                                <div>📧 <?= htmlspecialchars($cliente['email']) ?></div>
-                            <?php endif; ?>
-                            <?php if ($cliente['telefono']): ?>
-                                <div>📞 <?= htmlspecialchars($cliente['telefono']) ?></div>
-                            <?php endif; ?>
-                            <?php if ($cliente['ultima_comunicazione']): ?>
-                                <div style="color: var(--gray-500);">
-                                    💬 <?= formatDataContatto($cliente['ultima_comunicazione']) ?>
-                                </div>
-                            <?php endif; ?>
-                        </div>
-
-                        <!-- Tipologia -->
-                        <div style="text-align: center;">
-                            <span class="tipologia-badge">
-                                <?= strtoupper($cliente['tipologia_azienda'] ?? 'N/A') ?>
-                            </span>
-                        </div>
-
-                        <!-- Stato -->
-                        <div>
-                            <span class="stato-badge stato-<?= $cliente['stato'] ?>">
-                                <?= getStatusIcon($cliente['stato']) ?> 
-                                <?= ucfirst($cliente['stato']) ?>
-                            </span>
-                        </div>
-
-                        <!-- Pratiche -->
-                        <div class="pratiche-summary">
-                            <div><strong><?= $cliente['totale_pratiche'] ?? 0 ?></strong> totali</div>
-                            <div style="color: var(--warning-yellow);">
-                                <strong><?= $cliente['pratiche_attive'] ?? 0 ?></strong> attive
-                            </div>
-                        </div>
-
-                        <!-- Operatore -->
-                        <div>
-                            <?php if ($cliente['operatore_responsabile_nome']): ?>
-                                <span class="operatore-badge">
-                                    <?= htmlspecialchars($cliente['operatore_responsabile_nome']) ?>
-                                </span>
-                            <?php else: ?>
-                                <span class="operatore-badge non-assegnato">
-                                    Non assegnato
-                                </span>
-                            <?php endif; ?>
-                        </div>
-
-                        <!-- Azioni -->
-                        <div class="actions-compact">
-                            <button class="btn-micro btn-view" onclick="viewCliente(<?= $cliente['id'] ?>)" title="Visualizza">
-                                👁️
-                            </button>
-                            <button class="btn-micro btn-edit" onclick="editCliente(<?= $cliente['id'] ?>)" title="Modifica">
-                                ✏️
-                            </button>
-                            <?php if ($isAdmin): ?>
-                                <button class="btn-micro btn-status" onclick="toggleStatus(<?= $cliente['id'] ?>, '<?= $cliente['stato'] ?>')" title="Cambia stato">
-                                    🔄
-                                </button>
-                            <?php endif; ?>
-                        </div>
-                    </div>
-                <?php endforeach; ?>
-            <?php endif; ?>
-        </div>
-    </main>
-
-    <!-- JavaScript per Interazioni -->
+    <!-- Script microinterazioni -->
     <script src="/crm/assets/js/microinteractions.js"></script>
-    <script>
-        // Funzioni specifiche clienti
-        function viewCliente(id) {
-            window.location.href = `/crm/?action=clienti&view=view&id=${id}`;
-        }
-
-        function editCliente(id) {
-            window.location.href = `/crm/?action=clienti&view=edit&id=${id}`;
-        }
-
-        function toggleStatus(id, currentStatus) {
-            const newStatus = currentStatus === 'attivo' ? 'sospeso' : 'attivo';
-            
-            if (!confirm(`Sicuro di voler cambiare lo stato del cliente in "${newStatus}"?`)) {
-                return;
-            }
-
-            fetch('/crm/?action=clienti', {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/x-www-form-urlencoded',
-                },
-                body: `action=toggle_status&cliente_id=${id}&status=${newStatus}`
-            })
-            .then(response => response.json())
-            .then(data => {
-                if (data.success) {
-                    showNotification(data.message, 'success');
-                    setTimeout(() => location.reload(), 1500);
-                } else {
-                    showNotification(data.message, 'error');
-                }
-            })
-            .catch(error => {
-                showNotification('Errore di connessione', 'error');
-                console.error('Error:', error);
-            });
-        }
-
-        // Funzione notifiche (da microinteractions.js se disponibile)
-        function showNotification(message, type = 'info') {
-            // Implementazione temporanea se microinteractions.js non è disponibile
-            if (typeof window.showNotification === 'function') {
-                window.showNotification(message, type);
-            } else {
-                alert(message);
-            }
-        }
-
-        // Auto-refresh per mantener dati aggiornati (ogni 5 minuti)
-        setInterval(() => {
-            // Solo se non ci sono modal aperti
-            if (!document.querySelector('.modal:not(.hidden)')) {
-                location.reload();
-            }
-        }, 300000);
-
-        // Inizializzazione
-        document.addEventListener('DOMContentLoaded', function() {
-            console.log('Modulo Clienti caricato - Layout ultra-denso attivo');
-            
-            // Highlighting search results se presente termine di ricerca
-            const searchTerm = "<?= htmlspecialchars($search) ?>";
-            if (searchTerm) {
-                highlightSearchResults(searchTerm);
-            }
-        });
-
-        function highlightSearchResults(term) {
-            if (!term) return;
-            
-            const clienteRows = document.querySelectorAll('.cliente-row');
-            clienteRows.forEach(row => {
-                const content = row.innerHTML;
-                const highlighted = content.replace(
-                    new RegExp(`(${term})`, 'gi'),
-                    '<mark style="background: yellow; padding: 0.1rem;">$1</mark>'
-                );
-                row.innerHTML = highlighted;
-            });
-        }
-    </script>
 </body>
 </html>
