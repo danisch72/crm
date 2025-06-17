@@ -2,13 +2,14 @@
 /**
  * modules/clienti/create.php - Creazione Nuovo Cliente CRM Re.De Consulting
  * 
- * ✅ VERSIONE CON SIDEBAR E HEADER CENTRALIZZATI
+ * ✅ VERSIONE DEFINITIVA CON COMPONENTI CENTRALIZZATI
+ * ✅ LAYOUT ULTRA-COMPATTO DATEV OPTIMAL
  * 
  * Features:
- * - Form creazione cliente con validazioni
- * - Business logic commercialisti
- * - Validazione CF/P.IVA italiana
- * - Assegnazione operatore responsabile
+ * - Form creazione con validazioni
+ * - Layout compatto a 2 colonne
+ * - Validazione CF/P.IVA in tempo reale
+ * - Design Datev Optimal
  */
 
 // Avvia sessione se non già attiva
@@ -25,13 +26,6 @@ if (!defined('CLIENTI_ROUTER_LOADED')) {
 // Variabili per i componenti
 $pageTitle = 'Nuovo Cliente';
 $pageIcon = '➕';
-
-// Solo admin possono creare clienti
-if (!$sessionInfo['is_admin']) {
-    $_SESSION['error_message'] = '⚠️ Solo gli amministratori possono creare nuovi clienti';
-    header('Location: /crm/?action=clienti');
-    exit;
-}
 
 // Carica lista operatori per assegnazione
 $operatori = [];
@@ -55,15 +49,23 @@ $tipologieAzienda = [
     'sas' => 'S.a.s. - Società in Accomandita Semplice'
 ];
 
-// Stati disponibili
-$statiDisponibili = [
-    'attivo' => 'Attivo',
-    'sospeso' => 'Sospeso'
-];
-
 // Gestione form submission
 $errors = [];
-$formData = [];
+$formData = [
+    'ragione_sociale' => '',
+    'tipologia_azienda' => 'individuale',
+    'codice_fiscale' => '',
+    'partita_iva' => '',
+    'indirizzo' => '',
+    'cap' => '',
+    'citta' => '',
+    'provincia' => '',
+    'telefono' => '',
+    'email' => '',
+    'pec' => '',
+    'operatore_responsabile_id' => $sessionInfo['operatore_id'],
+    'note' => ''
+];
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     // Raccogli dati form
@@ -79,33 +81,38 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         'telefono' => trim($_POST['telefono'] ?? ''),
         'email' => strtolower(trim($_POST['email'] ?? '')),
         'pec' => strtolower(trim($_POST['pec'] ?? '')),
-        'codice_univoco' => strtoupper(trim($_POST['codice_univoco'] ?? '')),
-        'operatore_responsabile_id' => $_POST['operatore_responsabile_id'] ?? null,
-        'stato' => $_POST['stato'] ?? 'attivo',
+           'operatore_responsabile_id' => (int)($_POST['operatore_responsabile_id'] ?? $sessionInfo['operatore_id']),
         'note' => trim($_POST['note'] ?? '')
     ];
     
     // Validazioni
     if (empty($formData['ragione_sociale'])) {
-        $errors[] = "La ragione sociale è obbligatoria";
+        $errors[] = "Ragione sociale obbligatoria";
     }
     
     if (empty($formData['tipologia_azienda'])) {
-        $errors[] = "La tipologia azienda è obbligatoria";
+        $errors[] = "Tipologia azienda obbligatoria";
     }
     
     // Validazione CF/P.IVA in base a tipologia
     if ($formData['tipologia_azienda'] === 'individuale') {
-        if (empty($formData['codice_fiscale']) || !preg_match('/^[A-Z]{6}[0-9]{2}[A-Z][0-9]{2}[A-Z][0-9]{3}[A-Z]$/', $formData['codice_fiscale'])) {
-            $errors[] = "Codice fiscale non valido per ditta individuale";
+        if (empty($formData['codice_fiscale'])) {
+            $errors[] = "Codice fiscale obbligatorio per ditte individuali";
+        } elseif (!isValidCodiceFiscale($formData['codice_fiscale'])) {
+            $errors[] = "Codice fiscale non valido";
         }
     } else {
-        if (empty($formData['partita_iva']) || !preg_match('/^[0-9]{11}$/', $formData['partita_iva'])) {
+        if (empty($formData['partita_iva'])) {
+            $errors[] = "Partita IVA obbligatoria per società";
+        } elseif (!isValidPartitaIva($formData['partita_iva'])) {
             $errors[] = "Partita IVA non valida";
         }
     }
     
-    // Validazione email
+    if (!empty($formData['cap']) && !preg_match('/^\d{5}$/', $formData['cap'])) {
+        $errors[] = "CAP non valido (5 cifre)";
+    }
+    
     if (!empty($formData['email']) && !filter_var($formData['email'], FILTER_VALIDATE_EMAIL)) {
         $errors[] = "Email non valida";
     }
@@ -114,35 +121,35 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $errors[] = "PEC non valida";
     }
     
-    // Validazione CAP
-    if (!empty($formData['cap']) && !preg_match('/^[0-9]{5}$/', $formData['cap'])) {
-        $errors[] = "CAP non valido (deve essere di 5 cifre)";
-    }
-    
-    // Se non ci sono errori, salva
+    // Verifica unicità CF/P.IVA
     if (empty($errors)) {
         try {
-            // Verifica unicità CF/P.IVA
             if (!empty($formData['codice_fiscale'])) {
-                $existing = $db->selectOne("SELECT id FROM clienti WHERE codice_fiscale = ?", [$formData['codice_fiscale']]);
+                $existing = $db->selectOne(
+                    "SELECT id FROM clienti WHERE codice_fiscale = ?", 
+                    [$formData['codice_fiscale']]
+                );
                 if ($existing) {
                     $errors[] = "Codice fiscale già presente in archivio";
                 }
             }
             
             if (!empty($formData['partita_iva'])) {
-                $existing = $db->selectOne("SELECT id FROM clienti WHERE partita_iva = ?", [$formData['partita_iva']]);
+                $existing = $db->selectOne(
+                    "SELECT id FROM clienti WHERE partita_iva = ?", 
+                    [$formData['partita_iva']]
+                );
                 if ($existing) {
                     $errors[] = "Partita IVA già presente in archivio";
                 }
             }
             
             if (empty($errors)) {
-                // Prepara dati per insert
+                // Prepara dati per inserimento
                 $insertData = $formData;
+                $insertData['stato'] = 'attivo';
                 $insertData['created_by'] = $sessionInfo['operatore_id'];
                 $insertData['created_at'] = date('Y-m-d H:i:s');
-                $insertData['updated_at'] = date('Y-m-d H:i:s');
                 
                 // Inserisci cliente
                 $clienteId = $db->insert('clienti', $insertData);
@@ -169,208 +176,175 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title><?= $pageTitle ?> - CRM Re.De</title>
     
-    <!-- CSS nell'ordine corretto -->
+    <!-- CSS Files -->
     <link rel="stylesheet" href="/crm/assets/css/design-system.css">
-    <link rel="stylesheet" href="/crm/assets/css/datev-style.css">
-    <link rel="stylesheet" href="/crm/assets/css/datev-professional.css">
+    <link rel="stylesheet" href="/crm/assets/css/datev-optimal.css">
     <link rel="stylesheet" href="/crm/assets/css/clienti.css">
     
     <style>
-        .form-container {
-            padding: 1.5rem;
-            background: #f9fafb;
-            min-height: calc(100vh - 64px);
+        /* Container uniforme con index_list */
+        .container {
+            padding: 1rem;
+            max-width: 100%;
+            margin: 0 auto;
         }
         
         .form-card {
             background: white;
             border-radius: 8px;
-            box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
-            border: 1px solid #e5e7eb;
-            padding: 1.5rem;
+            box-shadow: 0 1px 3px rgba(0, 0, 0, 0.05);
+            padding: 1.25rem;
+            width: 100%;
+            max-width: none;
         }
         
         .form-header {
-            margin-bottom: 1.5rem;
-            padding-bottom: 1rem;
-            border-bottom: 1px solid #e5e7eb;
+            margin-bottom: 1rem;
+            padding-bottom: 0.75rem;
+            border-bottom: 1px solid var(--gray-200);
         }
         
         .form-title {
-            font-size: 1.25rem;
+            font-size: 1.125rem;
             font-weight: 600;
-            color: #1f2937;
+            color: var(--gray-900);
             display: flex;
             align-items: center;
             gap: 0.5rem;
-        }
-        
-        .form-section {
-            margin-bottom: 1.5rem;
-        }
-        
-        .section-title {
-            font-size: 0.875rem;
-            font-weight: 600;
-            color: #4b5563;
-            margin-bottom: 0.75rem;
-            display: flex;
-            align-items: center;
-            gap: 0.5rem;
+            margin: 0;
         }
         
         .form-grid {
             display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
-            gap: 1rem;
+            grid-template-columns: repeat(2, 1fr);
+            gap: 0.75rem;
+        }
+        
+        .form-section {
+            margin-bottom: 1rem;
+        }
+        
+        .section-title {
+            font-size: 0.813rem;
+            font-weight: 600;
+            color: var(--gray-700);
+            margin-bottom: 0.5rem;
+            display: flex;
+            align-items: center;
+            gap: 0.375rem;
         }
         
         .form-group {
-            margin-bottom: 0.75rem;
-        }
-        
-        .form-group.full-width {
-            grid-column: 1 / -1;
+            margin-bottom: 0.625rem;
         }
         
         .form-label {
             display: block;
-            font-size: 0.8125rem;
+            margin-bottom: 0.25rem;
+            font-size: 0.75rem;
             font-weight: 500;
-            color: #374151;
-            margin-bottom: 0.375rem;
+            color: var(--gray-700);
         }
         
-        .form-label.required::after {
-            content: " *";
-            color: #ef4444;
+        .form-label-required::after {
+            content: ' *';
+            color: var(--color-danger);
         }
         
-        .form-input {
+        .form-control {
             width: 100%;
-            padding: 0.5rem 0.75rem;
-            font-size: 0.8125rem;
-            border: 1px solid #e5e7eb;
-            border-radius: 6px;
+            padding: 0.375rem 0.625rem;
+            font-size: 0.813rem;
+            border: 1px solid var(--gray-300);
+            border-radius: 4px;
             transition: all 0.2s;
-            background: #ffffff;
         }
         
-        .form-input:focus {
+        .form-control:focus {
             outline: none;
-            border-color: #007849;
-            box-shadow: 0 0 0 3px rgba(0, 120, 73, 0.1);
+            border-color: var(--primary-green);
+            box-shadow: 0 0 0 2px rgba(0, 120, 73, 0.1);
         }
         
-        .form-select {
-            width: 100%;
-            padding: 0.5rem 0.75rem;
-            font-size: 0.8125rem;
-            border: 1px solid #e5e7eb;
-            border-radius: 6px;
-            background: white;
-            cursor: pointer;
-        }
-        
-        .form-textarea {
-            width: 100%;
-            padding: 0.5rem 0.75rem;
-            font-size: 0.8125rem;
-            border: 1px solid #e5e7eb;
-            border-radius: 6px;
+        textarea.form-control {
             resize: vertical;
-            min-height: 80px;
+            min-height: 60px;
+        }
+        
+        .form-hint {
+            font-size: 0.688rem;
+            color: var(--gray-500);
+            margin-top: 0.125rem;
         }
         
         .form-actions {
             display: flex;
             gap: 0.75rem;
-            justify-content: flex-end;
-            margin-top: 1.5rem;
-            padding-top: 1.5rem;
-            border-top: 1px solid #e5e7eb;
+            justify-content: space-between;
+            margin-top: 1rem;
+            padding-top: 1rem;
+            border-top: 1px solid var(--gray-200);
         }
         
-        .btn-submit {
-            background: #007849;
-            color: white;
-            padding: 0.625rem 1.5rem;
-            border: none;
-            border-radius: 6px;
-            font-weight: 500;
-            font-size: 0.8125rem;
-            cursor: pointer;
-            transition: all 0.2s;
+        .error-list {
+            background: var(--color-danger-light);
+            border: 1px solid var(--color-danger);
+            border-radius: 4px;
+            padding: 0.625rem;
+            margin-bottom: 0.75rem;
         }
         
-        .btn-submit:hover {
-            background: #005a37;
-            transform: translateY(-1px);
-            box-shadow: 0 4px 6px rgba(0, 120, 73, 0.2);
+        .error-list ul {
+            margin: 0;
+            padding-left: 1rem;
         }
         
-        .btn-cancel {
-            background: #ffffff;
-            color: #4b5563;
-            padding: 0.625rem 1.5rem;
-            border: 1px solid #e5e7eb;
-            border-radius: 6px;
-            font-weight: 500;
-            font-size: 0.8125rem;
-            cursor: pointer;
-            text-decoration: none;
-            transition: all 0.2s;
-        }
-        
-        .btn-cancel:hover {
-            background: #f9fafb;
-            border-color: #d1d5db;
-        }
-        
-        .alert {
-            padding: 0.75rem 1rem;
-            border-radius: 6px;
-            margin-bottom: 1rem;
-            font-size: 0.8125rem;
-            border: 1px solid;
-        }
-        
-        .alert-danger {
-            background: #fef2f2;
-            color: #991b1b;
-            border-color: #fecaca;
-        }
-        
-        .form-help {
+        .error-list li {
+            color: var(--color-danger);
             font-size: 0.75rem;
-            color: #6b7280;
-            margin-top: 0.25rem;
+            line-height: 1.3;
+        }
+        
+        /* Grid responsive più ampio */
+        @media (min-width: 1200px) {
+            .form-grid {
+                grid-template-columns: repeat(3, 1fr);
+            }
+        }
+        
+        @media (max-width: 768px) {
+            .form-grid {
+                grid-template-columns: 1fr;
+            }
+            
+            .form-actions {
+                flex-direction: column;
+            }
         }
     </style>
 </head>
-<body>
-    <!-- ✅ COMPONENTE SIDEBAR (OBBLIGATORIO) -->
-    <?php include $_SERVER['DOCUMENT_ROOT'] . '/crm/components/navigation.php'; ?>
-    
-    <!-- ✅ COMPONENTE HEADER (OBBLIGATORIO) -->
-    <?php include $_SERVER['DOCUMENT_ROOT'] . '/crm/components/header.php'; ?>
-    
-    <!-- Content Wrapper con padding top per header -->
-    <div class="content-wrapper">
+<body class="datev-compact">
+    <div class="app-layout">
+        <!-- ✅ COMPONENTE SIDEBAR (OBBLIGATORIO) -->
+        <?php include $_SERVER['DOCUMENT_ROOT'] . '/crm/components/navigation.php'; ?>
+        
+        <div class="content-wrapper">
+            <!-- ✅ COMPONENTE HEADER (OBBLIGATORIO) -->
+            <?php include $_SERVER['DOCUMENT_ROOT'] . '/crm/components/header.php'; ?>
             
             <main class="main-content">
-                <div class="form-container">
-                    <div class="form-card">
+                <div class="container">
+                    <form method="POST" class="form-card">
                         <div class="form-header">
                             <h1 class="form-title">
-                                <?= $pageIcon ?> Nuovo Cliente
+                                <span><?= $pageIcon ?></span>
+                                <span>Creazione Nuovo Cliente</span>
                             </h1>
                         </div>
                         
                         <?php if (!empty($errors)): ?>
-                            <div class="alert alert-danger">
-                                <strong>Errori nel form:</strong>
-                                <ul style="margin: 0.5rem 0 0 1.5rem;">
+                            <div class="error-list">
+                                <ul>
                                     <?php foreach ($errors as $error): ?>
                                         <li><?= htmlspecialchars($error) ?></li>
                                     <?php endforeach; ?>
@@ -378,229 +352,250 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                             </div>
                         <?php endif; ?>
                         
-                        <form method="POST" action="/crm/?action=clienti&view=create">
-                            <!-- Sezione Dati Anagrafici -->
-                            <div class="form-section">
-                                <h2 class="section-title">📋 Dati Anagrafici</h2>
-                                <div class="form-grid">
-                                    <div class="form-group full-width">
-                                        <label for="ragione_sociale" class="form-label required">Ragione Sociale</label>
-                                        <input type="text" 
-                                               id="ragione_sociale" 
-                                               name="ragione_sociale" 
-                                               class="form-input" 
-                                               value="<?= htmlspecialchars($formData['ragione_sociale'] ?? '') ?>" 
-                                               required>
-                                    </div>
-                                    
-                                    <div class="form-group">
-                                        <label for="tipologia_azienda" class="form-label required">Tipologia Azienda</label>
-                                        <select id="tipologia_azienda" name="tipologia_azienda" class="form-select" required>
-                                            <option value="">-- Seleziona --</option>
-                                            <?php foreach ($tipologieAzienda as $value => $label): ?>
-                                                <option value="<?= $value ?>" <?= ($formData['tipologia_azienda'] ?? '') == $value ? 'selected' : '' ?>>
-                                                    <?= htmlspecialchars($label) ?>
-                                                </option>
-                                            <?php endforeach; ?>
-                                        </select>
-                                    </div>
-                                    
-                                    <div class="form-group">
-                                        <label for="codice_fiscale" class="form-label">Codice Fiscale</label>
-                                        <input type="text" 
-                                               id="codice_fiscale" 
-                                               name="codice_fiscale" 
-                                               class="form-input" 
-                                               value="<?= htmlspecialchars($formData['codice_fiscale'] ?? '') ?>" 
-                                               maxlength="16"
-                                               style="text-transform: uppercase;">
-                                        <div class="form-help">16 caratteri per persone fisiche</div>
-                                    </div>
-                                    
-                                    <div class="form-group">
-                                        <label for="partita_iva" class="form-label">Partita IVA</label>
-                                        <input type="text" 
-                                               id="partita_iva" 
-                                               name="partita_iva" 
-                                               class="form-input" 
-                                               value="<?= htmlspecialchars($formData['partita_iva'] ?? '') ?>" 
-                                               maxlength="11">
-                                        <div class="form-help">11 cifre per aziende</div>
-                                    </div>
+                        <!-- Dati principali -->
+                        <div class="form-section">
+                            <h3 class="section-title">
+                                <span>📋</span>
+                                <span>Dati Principali</span>
+                            </h3>
+                            
+                            <div class="form-grid">
+                                <div class="form-group" style="grid-column: 1 / -1;">
+                                    <label class="form-label form-label-required">Ragione Sociale</label>
+                                    <input type="text" 
+                                           name="ragione_sociale" 
+                                           class="form-control" 
+                                           value="<?= htmlspecialchars($formData['ragione_sociale']) ?>"
+                                           required
+                                           autofocus>
+                                </div>
+                                
+                                <div class="form-group">
+                                    <label class="form-label form-label-required">Tipologia Azienda</label>
+                                    <select name="tipologia_azienda" 
+                                            class="form-control" 
+                                            id="tipologiaAzienda"
+                                            required>
+                                        <?php foreach ($tipologieAzienda as $value => $label): ?>
+                                            <option value="<?= $value ?>" <?= $formData['tipologia_azienda'] === $value ? 'selected' : '' ?>>
+                                                <?= htmlspecialchars($label) ?>
+                                            </option>
+                                        <?php endforeach; ?>
+                                    </select>
+                                </div>
+                                
+                                <div class="form-group">
+                                    <label class="form-label">Operatore Responsabile</label>
+                                    <select name="operatore_responsabile_id" class="form-control">
+                                        <?php foreach ($operatori as $op): ?>
+                                            <option value="<?= $op['id'] ?>" <?= $formData['operatore_responsabile_id'] == $op['id'] ? 'selected' : '' ?>>
+                                                <?= htmlspecialchars($op['nome_completo']) ?>
+                                            </option>
+                                        <?php endforeach; ?>
+                                    </select>
                                 </div>
                             </div>
+                        </div>
+                        
+                        <!-- Dati fiscali -->
+                        <div class="form-section">
+                            <h3 class="section-title">
+                                <span>🧾</span>
+                                <span>Dati Fiscali</span>
+                            </h3>
                             
-                            <!-- Sezione Sede Legale -->
-                            <div class="form-section">
-                                <h2 class="section-title">🏢 Sede Legale</h2>
-                                <div class="form-grid">
-                                    <div class="form-group full-width">
-                                        <label for="indirizzo" class="form-label">Indirizzo</label>
-                                        <input type="text" 
-                                               id="indirizzo" 
-                                               name="indirizzo" 
-                                               class="form-input" 
-                                               value="<?= htmlspecialchars($formData['indirizzo'] ?? '') ?>">
-                                    </div>
-                                    
-                                    <div class="form-group">
-                                        <label for="cap" class="form-label">CAP</label>
-                                        <input type="text" 
-                                               id="cap" 
-                                               name="cap" 
-                                               class="form-input" 
-                                               value="<?= htmlspecialchars($formData['cap'] ?? '') ?>" 
-                                               maxlength="5">
-                                    </div>
-                                    
-                                    <div class="form-group">
-                                        <label for="citta" class="form-label">Città</label>
-                                        <input type="text" 
-                                               id="citta" 
-                                               name="citta" 
-                                               class="form-input" 
-                                               value="<?= htmlspecialchars($formData['citta'] ?? '') ?>">
-                                    </div>
-                                    
-                                    <div class="form-group">
-                                        <label for="provincia" class="form-label">Provincia</label>
-                                        <input type="text" 
-                                               id="provincia" 
-                                               name="provincia" 
-                                               class="form-input" 
-                                               value="<?= htmlspecialchars($formData['provincia'] ?? '') ?>" 
-                                               maxlength="2"
-                                               style="text-transform: uppercase;">
-                                    </div>
+                            <div class="form-grid">
+                                <div class="form-group">
+                                    <label class="form-label" id="labelCodiceFiscale">Codice Fiscale</label>
+                                    <input type="text" 
+                                           name="codice_fiscale" 
+                                           class="form-control" 
+                                           value="<?= htmlspecialchars($formData['codice_fiscale']) ?>"
+                                           maxlength="16"
+                                           style="text-transform: uppercase;">
+                                    <div class="form-hint">16 caratteri per persone fisiche</div>
+                                </div>
+                                
+                                <div class="form-group">
+                                    <label class="form-label" id="labelPartitaIva">Partita IVA</label>
+                                    <input type="text" 
+                                           name="partita_iva" 
+                                           class="form-control" 
+                                           value="<?= htmlspecialchars($formData['partita_iva']) ?>"
+                                           maxlength="11">
+                                    <div class="form-hint">11 cifre numeriche</div>
                                 </div>
                             </div>
+                        </div>
+                        
+                        <!-- Recapiti -->
+                        <div class="form-section">
+                            <h3 class="section-title">
+                                <span>📍</span>
+                                <span>Recapiti e Contatti</span>
+                            </h3>
                             
-                            <!-- Sezione Contatti -->
-                            <div class="form-section">
-                                <h2 class="section-title">📞 Contatti</h2>
-                                <div class="form-grid">
-                                    <div class="form-group">
-                                        <label for="telefono" class="form-label">Telefono</label>
-                                        <input type="tel" 
-                                               id="telefono" 
-                                               name="telefono" 
-                                               class="form-input" 
-                                               value="<?= htmlspecialchars($formData['telefono'] ?? '') ?>">
-                                    </div>
-                                    
-                                    <div class="form-group">
-                                        <label for="email" class="form-label">Email</label>
-                                        <input type="email" 
-                                               id="email" 
-                                               name="email" 
-                                               class="form-input" 
-                                               value="<?= htmlspecialchars($formData['email'] ?? '') ?>">
-                                    </div>
-                                    
-                                    <div class="form-group">
-                                        <label for="pec" class="form-label">PEC</label>
-                                        <input type="email" 
-                                               id="pec" 
-                                               name="pec" 
-                                               class="form-input" 
-                                               value="<?= htmlspecialchars($formData['pec'] ?? '') ?>">
-                                    </div>
-                                    
-                                    <div class="form-group">
-                                        <label for="codice_univoco" class="form-label">Codice Univoco SDI</label>
-                                        <input type="text" 
-                                               id="codice_univoco" 
-                                               name="codice_univoco" 
-                                               class="form-input" 
-                                               value="<?= htmlspecialchars($formData['codice_univoco'] ?? '') ?>" 
-                                               maxlength="7"
-                                               style="text-transform: uppercase;">
-                                    </div>
+                            <div class="form-grid">
+                                <div class="form-group" style="grid-column: 1 / -1;">
+                                    <label class="form-label">Indirizzo</label>
+                                    <input type="text" 
+                                           name="indirizzo" 
+                                           class="form-control" 
+                                           value="<?= htmlspecialchars($formData['indirizzo']) ?>">
+                                </div>
+                                
+                                <div class="form-group">
+                                    <label class="form-label">CAP</label>
+                                    <input type="text" 
+                                           name="cap" 
+                                           class="form-control" 
+                                           value="<?= htmlspecialchars($formData['cap']) ?>"
+                                           maxlength="5">
+                                </div>
+                                
+                                <div class="form-group">
+                                    <label class="form-label">Città</label>
+                                    <input type="text" 
+                                           name="citta" 
+                                           class="form-control" 
+                                           value="<?= htmlspecialchars($formData['citta']) ?>">
+                                </div>
+                                
+                                <div class="form-group">
+                                    <label class="form-label">Provincia</label>
+                                    <input type="text" 
+                                           name="provincia" 
+                                           class="form-control" 
+                                           value="<?= htmlspecialchars($formData['provincia']) ?>"
+                                           maxlength="2"
+                                           style="text-transform: uppercase;">
+                                </div>
+                                
+                                <div class="form-group">
+                                    <label class="form-label">Telefono</label>
+                                    <input type="tel" 
+                                           name="telefono" 
+                                           class="form-control" 
+                                           value="<?= htmlspecialchars($formData['telefono']) ?>">
+                                </div>
+                                
+                                <div class="form-group">
+                                    <label class="form-label">Email</label>
+                                    <input type="email" 
+                                           name="email" 
+                                           class="form-control" 
+                                           value="<?= htmlspecialchars($formData['email']) ?>">
+                                </div>
+                                
+                                <div class="form-group">
+                                    <label class="form-label">PEC</label>
+                                    <input type="email" 
+                                           name="pec" 
+                                           class="form-control" 
+                                           value="<?= htmlspecialchars($formData['pec']) ?>">
                                 </div>
                             </div>
+                        </div>
+                        
+                        <!-- Note -->
+                        <div class="form-section">
+                            <h3 class="section-title">
+                                <span>📝</span>
+                                <span>Note Aggiuntive</span>
+                            </h3>
                             
-                            <!-- Sezione Gestione -->
-                            <div class="form-section">
-                                <h2 class="section-title">⚙️ Gestione</h2>
-                                <div class="form-grid">
-                                    <div class="form-group">
-                                        <label for="operatore_responsabile_id" class="form-label">Operatore Responsabile</label>
-                                        <select id="operatore_responsabile_id" name="operatore_responsabile_id" class="form-select">
-                                            <option value="">-- Non assegnato --</option>
-                                            <?php foreach ($operatori as $operatore): ?>
-                                                <option value="<?= $operatore['id'] ?>" <?= ($formData['operatore_responsabile_id'] ?? '') == $operatore['id'] ? 'selected' : '' ?>>
-                                                    <?= htmlspecialchars($operatore['nome_completo']) ?>
-                                                </option>
-                                            <?php endforeach; ?>
-                                        </select>
-                                    </div>
-                                    
-                                    <div class="form-group">
-                                        <label for="stato" class="form-label">Stato</label>
-                                        <select id="stato" name="stato" class="form-select">
-                                            <?php foreach ($statiDisponibili as $value => $label): ?>
-                                                <option value="<?= $value ?>" <?= ($formData['stato'] ?? 'attivo') == $value ? 'selected' : '' ?>>
-                                                    <?= htmlspecialchars($label) ?>
-                                                </option>
-                                            <?php endforeach; ?>
-                                        </select>
-                                    </div>
-                                    
-                                    <div class="form-group full-width">
-                                        <label for="note" class="form-label">Note</label>
-                                        <textarea id="note" 
-                                                  name="note" 
-                                                  class="form-textarea" 
-                                                  rows="3"><?= htmlspecialchars($formData['note'] ?? '') ?></textarea>
-                                    </div>
-                                </div>
+                            <div class="form-group">
+                                <textarea name="note" 
+                                          class="form-control" 
+                                          rows="2"
+                                          placeholder="Eventuali note o informazioni aggiuntive..."><?= htmlspecialchars($formData['note']) ?></textarea>
                             </div>
+                        </div>
+                        
+                        <!-- Azioni -->
+                        <div class="form-actions">
+                            <a href="/crm/?action=clienti" class="btn btn-secondary">
+                                <span>← Annulla</span>
+                            </a>
                             
-                            <!-- Azioni -->
-                            <div class="form-actions">
-                                <a href="/crm/?action=clienti" class="btn-cancel">Annulla</a>
-                                <button type="submit" class="btn-submit">
-                                    💾 Salva Cliente
-                                </button>
-                            </div>
-                        </form>
-                    </div>
+                            <button type="submit" class="btn btn-primary">
+                                <span>💾 Salva Cliente</span>
+                            </button>
+                        </div>
+                    </form>
                 </div>
             </main>
         </div>
-
-    <!-- Script per validazioni e interazioni -->
-    <script>
-        // Auto-uppercase per campi specifici
-        document.getElementById('codice_fiscale').addEventListener('input', function(e) {
-            e.target.value = e.target.value.toUpperCase();
-        });
-        
-        document.getElementById('provincia').addEventListener('input', function(e) {
-            e.target.value = e.target.value.toUpperCase();
-        });
-        
-        document.getElementById('codice_univoco').addEventListener('input', function(e) {
-            e.target.value = e.target.value.toUpperCase();
-        });
-        
-        // Validazione tipologia e campi obbligatori
-        document.getElementById('tipologia_azienda').addEventListener('change', function(e) {
-            const tipo = e.target.value;
-            const cfField = document.getElementById('codice_fiscale');
-            const pivaField = document.getElementById('partita_iva');
-            
-            if (tipo === 'individuale') {
-                cfField.parentElement.querySelector('.form-label').classList.add('required');
-                pivaField.parentElement.querySelector('.form-label').classList.remove('required');
-            } else if (tipo !== '') {
-                cfField.parentElement.querySelector('.form-label').classList.remove('required');
-                pivaField.parentElement.querySelector('.form-label').classList.add('required');
-            }
-        });
-    </script>
+    </div>
     
-    <!-- Script microinterazioni -->
-    <script src="/crm/assets/js/microinteractions.js"></script>
+    <script>
+    // Gestione dinamica campi fiscali
+    document.getElementById('tipologiaAzienda').addEventListener('change', function() {
+        const isIndividuale = this.value === 'individuale';
+        const cfLabel = document.getElementById('labelCodiceFiscale');
+        const pivaLabel = document.getElementById('labelPartitaIva');
+        
+        if (isIndividuale) {
+            cfLabel.classList.add('form-label-required');
+            pivaLabel.classList.remove('form-label-required');
+        } else {
+            cfLabel.classList.remove('form-label-required');
+            pivaLabel.classList.add('form-label-required');
+        }
+    });
+    
+    // Trigger iniziale
+    document.getElementById('tipologiaAzienda').dispatchEvent(new Event('change'));
+    
+    // Auto uppercase
+    document.querySelectorAll('input[style*="text-transform: uppercase"]').forEach(input => {
+        input.addEventListener('input', function() {
+            this.value = this.value.toUpperCase();
+        });
+    });
+    </script>
 </body>
 </html>
+
+<?php
+// Funzioni di validazione
+function isValidCodiceFiscale($cf) {
+    $cf = strtoupper(trim($cf));
+    
+    // Controllo lunghezza
+    if (strlen($cf) != 16 && strlen($cf) != 11) {
+        return false;
+    }
+    
+    // CF persona fisica (16 caratteri)
+    if (strlen($cf) == 16) {
+        return preg_match('/^[A-Z]{6}[0-9]{2}[A-Z][0-9]{2}[A-Z][0-9]{3}[A-Z]$/', $cf);
+    }
+    
+    // CF persona giuridica (11 caratteri numerici)
+    return preg_match('/^[0-9]{11}$/', $cf);
+}
+
+function isValidPartitaIva($piva) {
+    $piva = trim($piva);
+    
+    // Deve essere 11 cifre
+    if (!preg_match('/^[0-9]{11}$/', $piva)) {
+        return false;
+    }
+    
+    // Algoritmo di controllo partita IVA italiana
+    $sum = 0;
+    for ($i = 0; $i < 11; $i++) {
+        $digit = (int)$piva[$i];
+        if ($i % 2 == 0) {
+            $sum += $digit;
+        } else {
+            $double = $digit * 2;
+            $sum += $double > 9 ? $double - 9 : $double;
+        }
+    }
+    
+    return $sum % 10 == 0;
+}
+?>

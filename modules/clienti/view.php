@@ -2,15 +2,14 @@
 /**
  * modules/clienti/view.php - Visualizzazione Dettagli Cliente CRM Re.De Consulting
  * 
- * ✅ VERSIONE CON SIDEBAR E HEADER CENTRALIZZATI
+ * ✅ VERSIONE DEFINITIVA CON COMPONENTI CENTRALIZZATI
+ * ✅ LAYOUT ULTRA-COMPATTO DATEV OPTIMAL
  * 
  * Features:
- * - Vista dettagliata cliente con tutte le informazioni
- * - Timeline attività
- * - Documenti recenti
- * - Comunicazioni recenti
- * - Pratiche associate
- * - Azioni rapide
+ * - Vista dettagliata cliente
+ * - Riepilogo pratiche e documenti
+ * - Timeline comunicazioni
+ * - Design Datev Optimal
  */
 
 // Avvia sessione se non già attiva
@@ -25,18 +24,18 @@ if (!defined('CLIENTI_ROUTER_LOADED')) {
 }
 
 // Variabili per i componenti
-$pageTitle = 'Dettagli Cliente';
-$pageIcon = '👁️';
+$pageTitle = 'Dettaglio Cliente';
+$pageIcon = '🏢';
 
 // $clienteId già validato dal router
 // Recupera dati cliente completi
+$cliente = null;
 try {
     $cliente = $db->selectOne("
-        SELECT 
-            c.*,
-            CONCAT(o.nome, ' ', o.cognome) as operatore_nome,
-            o.email as operatore_email,
-            o.telefono as operatore_telefono
+        SELECT c.*, 
+               CONCAT(o.nome, ' ', o.cognome) as operatore_nome,
+               o.email as operatore_email,
+               o.telefono as operatore_telefono
         FROM clienti c
         LEFT JOIN operatori o ON c.operatore_responsabile_id = o.id
         WHERE c.id = ?
@@ -47,81 +46,103 @@ try {
         header('Location: /crm/?action=clienti');
         exit;
     }
-    
-    // Statistiche cliente
-    $stats = [
-        'pratiche_totali' => $db->selectOne("SELECT COUNT(*) as count FROM pratiche WHERE cliente_id = ?", [$clienteId])['count'] ?? 0,
-        'pratiche_attive' => $db->selectOne("SELECT COUNT(*) as count FROM pratiche WHERE cliente_id = ? AND stato = 'attiva'", [$clienteId])['count'] ?? 0,
-        'documenti_totali' => $db->selectOne("SELECT COUNT(*) as count FROM documenti_clienti WHERE cliente_id = ?", [$clienteId])['count'] ?? 0,
-        'comunicazioni_totali' => $db->selectOne("SELECT COUNT(*) as count FROM comunicazioni_clienti WHERE cliente_id = ?", [$clienteId])['count'] ?? 0
-    ];
-    
-    // Documenti recenti
-    $documentiRecenti = $db->select("
+} catch (Exception $e) {
+    error_log("Errore caricamento cliente: " . $e->getMessage());
+    $_SESSION['error_message'] = '⚠️ Errore caricamento dati';
+    header('Location: /crm/?action=clienti');
+    exit;
+}
+
+// Statistiche cliente
+$stats = [
+    'pratiche_totali' => 0,
+    'pratiche_attive' => 0,
+    'documenti_totali' => 0,
+    'comunicazioni_totali' => 0,
+    'ultima_comunicazione' => null
+];
+
+try {
+    // Pratiche
+    $pratiche = $db->selectOne("
         SELECT 
-            dc.*,
-            CONCAT(o.nome, ' ', o.cognome) as operatore_nome
-        FROM documenti_clienti dc
-        LEFT JOIN operatori o ON dc.operatore_id = o.id
-        WHERE dc.cliente_id = ?
-        ORDER BY dc.data_upload DESC
-        LIMIT 5
+            COUNT(*) as totali,
+            COUNT(CASE WHEN stato = 'attiva' THEN 1 END) as attive
+        FROM pratiche 
+        WHERE cliente_id = ?
     ", [$clienteId]);
     
-    // Comunicazioni recenti
-    $comunicazioniRecenti = $db->select("
+    if ($pratiche) {
+        $stats['pratiche_totali'] = $pratiche['totali'];
+        $stats['pratiche_attive'] = $pratiche['attive'];
+    }
+    
+    // Documenti
+    $stats['documenti_totali'] = $db->count('documenti_clienti', 'cliente_id = ?', [$clienteId]);
+    
+    // Comunicazioni
+    $comunicazioni = $db->selectOne("
         SELECT 
-            cc.*,
-            CONCAT(o.nome, ' ', o.cognome) as operatore_nome
+            COUNT(*) as totali,
+            MAX(created_at) as ultima
+        FROM comunicazioni_clienti 
+        WHERE cliente_id = ?
+    ", [$clienteId]);
+    
+    if ($comunicazioni) {
+        $stats['comunicazioni_totali'] = $comunicazioni['totali'];
+        $stats['ultima_comunicazione'] = $comunicazioni['ultima'];
+    }
+} catch (Exception $e) {
+    error_log("Errore caricamento statistiche cliente: " . $e->getMessage());
+}
+
+// Ultime comunicazioni
+$ultimeComunicazioni = [];
+try {
+    $ultimeComunicazioni = $db->select("
+        SELECT cc.*, 
+               CONCAT(o.nome, ' ', o.cognome) as operatore_nome
         FROM comunicazioni_clienti cc
         LEFT JOIN operatori o ON cc.operatore_id = o.id
         WHERE cc.cliente_id = ?
         ORDER BY cc.created_at DESC
         LIMIT 5
     ", [$clienteId]);
-    
-    // Pratiche associate
-    $pratiche = $db->select("
-        SELECT 
-            p.*,
-            tp.nome as tipo_pratica_nome
-        FROM pratiche p
-        LEFT JOIN tipi_pratiche tp ON p.tipo_pratica_id = tp.id
-        WHERE p.cliente_id = ?
-        ORDER BY p.created_at DESC
-        LIMIT 10
-    ", [$clienteId]);
-    
 } catch (Exception $e) {
-    error_log("Errore caricamento dati cliente: " . $e->getMessage());
-    $_SESSION['error_message'] = '⚠️ Errore nel caricamento dei dati';
-    header('Location: /crm/?action=clienti');
-    exit;
+    error_log("Errore caricamento comunicazioni: " . $e->getMessage());
 }
 
-// Funzioni helper
-function getTipologiaIcon($tipologia) {
+// Helper functions
+function getTipologiaIcon($tipo) {
     $icons = [
         'individuale' => '👤',
         'srl' => '🏢',
-        'spa' => '🏛️',
-        'snc' => '🤝',
-        'sas' => '🏪'
+        'spa' => '🏭',
+        'snc' => '👥',
+        'sas' => '🤝'
     ];
-    return $icons[$tipologia] ?? '🏢';
+    return $icons[$tipo] ?? '🏢';
 }
 
-function formatIndirizzoCompleto($cliente) {
-    $parts = [];
-    if ($cliente['indirizzo']) $parts[] = $cliente['indirizzo'];
-    if ($cliente['cap']) $parts[] = $cliente['cap'];
-    if ($cliente['citta']) $parts[] = $cliente['citta'];
-    if ($cliente['provincia']) $parts[] = '(' . $cliente['provincia'] . ')';
-    return implode(' ', $parts);
+function getTipologiaLabel($tipo) {
+    $labels = [
+        'individuale' => 'Ditta Individuale',
+        'srl' => 'S.r.l.',
+        'spa' => 'S.p.A.',
+        'snc' => 'S.n.c.',
+        'sas' => 'S.a.s.'
+    ];
+    return $labels[$tipo] ?? $tipo;
 }
 
 function getStatoClass($stato) {
-    return $stato === 'attivo' ? 'status-active' : ($stato === 'sospeso' ? 'status-warning' : 'status-inactive');
+    $classes = [
+        'attivo' => 'status-active',
+        'sospeso' => 'status-warning',
+        'chiuso' => 'status-inactive'
+    ];
+    return $classes[$stato] ?? '';
 }
 
 function getStatoLabel($stato) {
@@ -133,17 +154,14 @@ function getStatoLabel($stato) {
     return $labels[$stato] ?? $stato;
 }
 
-function getCategoriaDocIcon($categoria) {
+function getTipoComunicazioneIcon($tipo) {
     $icons = [
-        'contratto' => '📄',
-        'fattura' => '🧾',
-        'documento_identita' => '🪪',
-        'visura' => '🏢',
-        'bilancio' => '📊',
-        'dichiarazione' => '📋',
-        'generale' => '📎'
+        'email' => '📧',
+        'telefono' => '📞',
+        'incontro' => '🤝',
+        'nota' => '📝'
     ];
-    return $icons[$categoria] ?? '📎';
+    return $icons[$tipo] ?? '💬';
 }
 ?>
 <!DOCTYPE html>
@@ -151,16 +169,17 @@ function getCategoriaDocIcon($categoria) {
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title><?= htmlspecialchars($cliente['ragione_sociale']) ?> - CRM Re.De</title>
+    <title><?= $pageTitle ?> - <?= htmlspecialchars($cliente['ragione_sociale']) ?> - CRM Re.De</title>
     
-    <!-- CSS nell'ordine corretto -->
+    <!-- CSS Files -->
     <link rel="stylesheet" href="/crm/assets/css/design-system.css">
-    <link rel="stylesheet" href="/crm/assets/css/datev-style.css">
+    <link rel="stylesheet" href="/crm/assets/css/datev-optimal.css">
     <link rel="stylesheet" href="/crm/assets/css/clienti.css">
     
     <style>
+        /* Layout ultra-compatto */
         .cliente-container {
-            padding: 2rem 1rem;
+            padding: 1.5rem;
             max-width: 1400px;
             margin: 0 auto;
         }
@@ -168,17 +187,18 @@ function getCategoriaDocIcon($categoria) {
         /* Header cliente */
         .cliente-header {
             background: white;
-            border-radius: var(--radius-lg);
-            padding: 2rem;
-            box-shadow: var(--shadow-md);
-            margin-bottom: 2rem;
+            border-radius: 8px;
+            box-shadow: 0 1px 3px rgba(0, 0, 0, 0.05);
+            padding: 1.5rem;
+            margin-bottom: 1.5rem;
         }
         
         .header-top {
             display: flex;
             justify-content: space-between;
             align-items: flex-start;
-            margin-bottom: 1.5rem;
+            gap: 1rem;
+            margin-bottom: 1rem;
         }
         
         .cliente-title {
@@ -189,112 +209,45 @@ function getCategoriaDocIcon($categoria) {
         
         .cliente-icon {
             font-size: 2.5rem;
+            line-height: 1;
         }
         
         .cliente-name {
-            font-size: 2rem;
+            font-size: 1.5rem;
             font-weight: 600;
             color: var(--gray-900);
+            margin: 0;
         }
         
         .cliente-id {
             font-size: 0.875rem;
             color: var(--gray-600);
-            margin-top: 0.25rem;
         }
         
         .cliente-actions {
             display: flex;
             gap: 0.5rem;
+            align-items: center;
         }
         
         .btn-action {
             padding: 0.5rem 1rem;
             font-size: 0.875rem;
-            border-radius: var(--radius-md);
-            border: 1px solid var(--gray-300);
-            background: white;
-            color: var(--gray-700);
-            cursor: pointer;
-            transition: all var(--transition-fast);
+            border-radius: 6px;
             text-decoration: none;
             display: inline-flex;
             align-items: center;
             gap: 0.5rem;
-        }
-        
-        .btn-action:hover {
-            border-color: var(--primary-green);
-            color: var(--primary-green);
-            transform: translateY(-1px);
+            transition: all 0.2s;
         }
         
         .btn-action.primary {
             background: var(--primary-green);
             color: white;
-            border-color: var(--primary-green);
         }
         
         .btn-action.primary:hover {
             background: var(--primary-green-hover);
-            border-color: var(--primary-green-hover);
-        }
-        
-        /* Status badge */
-        .status-badge {
-            display: inline-flex;
-            align-items: center;
-            gap: 0.25rem;
-            padding: 0.25rem 0.75rem;
-            border-radius: var(--radius-full);
-            font-size: 0.875rem;
-            font-weight: 500;
-        }
-        
-        .status-active {
-            background: var(--color-success-light);
-            color: var(--color-success);
-        }
-        
-        .status-warning {
-            background: var(--color-warning-light);
-            color: var(--color-warning);
-        }
-        
-        .status-inactive {
-            background: var(--color-danger-light);
-            color: var(--color-danger);
-        }
-        
-        /* Info grid */
-        .info-grid {
-            display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
-            gap: 1.5rem;
-        }
-        
-        .info-group {
-            display: flex;
-            flex-direction: column;
-            gap: 0.5rem;
-        }
-        
-        .info-label {
-            font-size: 0.75rem;
-            font-weight: 600;
-            color: var(--gray-600);
-            text-transform: uppercase;
-            letter-spacing: 0.05em;
-        }
-        
-        .info-value {
-            font-size: 0.875rem;
-            color: var(--gray-900);
-        }
-        
-        .info-value.empty {
-            color: var(--gray-400);
-            font-style: italic;
         }
         
         /* Stats cards */
@@ -302,15 +255,14 @@ function getCategoriaDocIcon($categoria) {
             display: grid;
             grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
             gap: 1rem;
-            margin-bottom: 2rem;
+            margin-bottom: 1.5rem;
         }
         
         .stat-card {
             background: white;
-            border-radius: var(--radius-lg);
-            padding: 1.5rem;
-            box-shadow: var(--shadow-sm);
-            border: 1px solid var(--gray-200);
+            padding: 1rem;
+            border-radius: 6px;
+            box-shadow: 0 1px 3px rgba(0, 0, 0, 0.05);
             text-align: center;
         }
         
@@ -320,49 +272,38 @@ function getCategoriaDocIcon($categoria) {
         }
         
         .stat-value {
-            font-size: 2rem;
+            font-size: 1.75rem;
             font-weight: 600;
             color: var(--gray-900);
+            margin: 0;
         }
         
         .stat-label {
-            font-size: 0.875rem;
+            font-size: 0.813rem;
             color: var(--gray-600);
-            margin-top: 0.25rem;
+            text-transform: uppercase;
+            letter-spacing: 0.025em;
         }
         
-        /* Content sections */
-        .content-sections {
+        /* Info sections */
+        .info-grid {
             display: grid;
-            grid-template-columns: 1fr 1fr;
-            gap: 2rem;
+            grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+            gap: 1.5rem;
+            margin-bottom: 1.5rem;
         }
         
-        @media (max-width: 1024px) {
-            .content-sections {
-                grid-template-columns: 1fr;
-            }
-        }
-        
-        .section-card {
+        .info-section {
             background: white;
-            border-radius: var(--radius-lg);
-            box-shadow: var(--shadow-sm);
-            border: 1px solid var(--gray-200);
+            border-radius: 8px;
+            box-shadow: 0 1px 3px rgba(0, 0, 0, 0.05);
             overflow: hidden;
         }
         
         .section-header {
-            padding: 1rem 1.5rem;
+            padding: 1rem 1.25rem;
             background: var(--gray-50);
             border-bottom: 1px solid var(--gray-200);
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-        }
-        
-        .section-title {
-            font-size: 1rem;
             font-weight: 600;
             color: var(--gray-800);
             display: flex;
@@ -371,71 +312,94 @@ function getCategoriaDocIcon($categoria) {
         }
         
         .section-content {
-            padding: 1rem;
+            padding: 1.25rem;
         }
         
-        /* List items */
-        .list-item {
-            padding: 0.75rem;
+        .info-row {
+            display: flex;
+            justify-content: space-between;
+            padding: 0.5rem 0;
             border-bottom: 1px solid var(--gray-100);
-            font-size: 0.875rem;
         }
         
-        .list-item:last-child {
+        .info-row:last-child {
             border-bottom: none;
         }
         
-        .list-item-header {
+        .info-label {
+            font-size: 0.813rem;
+            color: var(--gray-600);
+        }
+        
+        .info-value {
+            font-size: 0.875rem;
+            color: var(--gray-900);
+            font-weight: 500;
+            text-align: right;
+        }
+        
+        /* Timeline comunicazioni */
+        .timeline {
+            padding: 1rem;
+        }
+        
+        .timeline-item {
             display: flex;
-            justify-content: space-between;
-            align-items: flex-start;
+            gap: 1rem;
+            padding: 0.75rem 0;
+            border-bottom: 1px solid var(--gray-100);
+        }
+        
+        .timeline-item:last-child {
+            border-bottom: none;
+        }
+        
+        .timeline-icon {
+            font-size: 1.25rem;
+            flex-shrink: 0;
+        }
+        
+        .timeline-content {
+            flex: 1;
+            min-width: 0;
+        }
+        
+        .timeline-title {
+            font-weight: 500;
+            color: var(--gray-900);
+            font-size: 0.875rem;
             margin-bottom: 0.25rem;
         }
         
-        .list-item-title {
-            font-weight: 500;
-            color: var(--gray-900);
-        }
-        
-        .list-item-meta {
+        .timeline-meta {
             font-size: 0.75rem;
             color: var(--gray-600);
-        }
-        
-        .list-item-description {
-            font-size: 0.75rem;
-            color: var(--gray-600);
-            margin-top: 0.25rem;
         }
         
         .empty-state {
             text-align: center;
             padding: 2rem;
-            color: var(--gray-500);
-            font-size: 0.875rem;
-        }
-        
-        /* Note section */
-        .note-section {
-            background: var(--gray-50);
-            border-radius: var(--radius-md);
-            padding: 1rem;
-            margin-top: 1rem;
-        }
-        
-        .note-label {
-            font-size: 0.75rem;
-            font-weight: 600;
             color: var(--gray-600);
-            text-transform: uppercase;
-            letter-spacing: 0.05em;
+        }
+        
+        .empty-state-icon {
+            font-size: 2.5rem;
             margin-bottom: 0.5rem;
         }
         
-        .note-text {
-            font-size: 0.875rem;
-            color: var(--gray-700);
-            white-space: pre-wrap;
+        @media (max-width: 768px) {
+            .header-top {
+                flex-direction: column;
+            }
+            
+            .cliente-actions {
+                width: 100%;
+                justify-content: flex-start;
+            }
+            
+            .info-grid {
+                grid-template-columns: 1fr;
+            }
         }
     </style>
 </head>
@@ -450,6 +414,15 @@ function getCategoriaDocIcon($categoria) {
             
             <main class="main-content">
                 <div class="cliente-container">
+                    <!-- Messaggi -->
+                    <?php if ($error_message): ?>
+                        <div class="alert alert-danger"><?= htmlspecialchars($error_message) ?></div>
+                    <?php endif; ?>
+                    
+                    <?php if ($success_message): ?>
+                        <div class="alert alert-success"><?= htmlspecialchars($success_message) ?></div>
+                    <?php endif; ?>
+                    
                     <!-- Header Cliente -->
                     <div class="cliente-header">
                         <div class="header-top">
@@ -461,7 +434,7 @@ function getCategoriaDocIcon($categoria) {
                                     <h1 class="cliente-name"><?= htmlspecialchars($cliente['ragione_sociale']) ?></h1>
                                     <div class="cliente-id">
                                         ID: #<?= str_pad($cliente['id'], 6, '0', STR_PAD_LEFT) ?> 
-                                        • <?= htmlspecialchars($cliente['tipologia_azienda']) ?>
+                                        • <?= getTipologiaLabel($cliente['tipologia_azienda']) ?>
                                     </div>
                                 </div>
                             </div>
@@ -474,275 +447,230 @@ function getCategoriaDocIcon($categoria) {
                                         ✏️ Modifica
                                     </a>
                                 <?php endif; ?>
-                                <a href="/crm/?action=clienti&view=documenti&id=<?= $clienteId ?>" class="btn-action">
+                                <a href="/crm/?action=clienti&view=documenti&id=<?= $clienteId ?>" class="btn-action btn-secondary">
                                     📁 Documenti
                                 </a>
-                                <a href="/crm/?action=clienti&view=comunicazioni&id=<?= $clienteId ?>" class="btn-action">
+                                <a href="/crm/?action=clienti&view=comunicazioni&id=<?= $clienteId ?>" class="btn-action btn-secondary">
                                     💬 Comunicazioni
                                 </a>
                             </div>
                         </div>
-                        
-                        <div class="info-grid">
-                            <!-- Dati fiscali -->
-                            <div class="info-group">
-                                <div class="info-label">Dati Fiscali</div>
-                                <?php if ($cliente['codice_fiscale']): ?>
-                                    <div class="info-value">CF: <?= htmlspecialchars($cliente['codice_fiscale']) ?></div>
-                                <?php endif; ?>
-                                <?php if ($cliente['partita_iva']): ?>
-                                    <div class="info-value">P.IVA: <?= htmlspecialchars($cliente['partita_iva']) ?></div>
-                                <?php endif; ?>
-                                <?php if ($cliente['codice_univoco']): ?>
-                                    <div class="info-value">SDI: <?= htmlspecialchars($cliente['codice_univoco']) ?></div>
-                                <?php endif; ?>
-                                <?php if (!$cliente['codice_fiscale'] && !$cliente['partita_iva']): ?>
-                                    <div class="info-value empty">Non specificati</div>
-                                <?php endif; ?>
-                            </div>
-                            
-                            <!-- Sede legale -->
-                            <div class="info-group">
-                                <div class="info-label">Sede Legale</div>
-                                <?php if ($cliente['indirizzo'] || $cliente['citta']): ?>
-                                    <div class="info-value"><?= htmlspecialchars(formatIndirizzoCompleto($cliente)) ?></div>
-                                <?php else: ?>
-                                    <div class="info-value empty">Non specificata</div>
-                                <?php endif; ?>
-                            </div>
-                            
-                            <!-- Contatti -->
-                            <div class="info-group">
-                                <div class="info-label">Contatti</div>
-                                <?php if ($cliente['telefono']): ?>
-                                    <div class="info-value">📞 <?= htmlspecialchars($cliente['telefono']) ?></div>
-                                <?php endif; ?>
-                                <?php if ($cliente['email']): ?>
-                                    <div class="info-value">📧 <?= htmlspecialchars($cliente['email']) ?></div>
-                                <?php endif; ?>
-                                <?php if ($cliente['pec']): ?>
-                                    <div class="info-value">📮 <?= htmlspecialchars($cliente['pec']) ?></div>
-                                <?php endif; ?>
-                                <?php if (!$cliente['telefono'] && !$cliente['email'] && !$cliente['pec']): ?>
-                                    <div class="info-value empty">Non specificati</div>
-                                <?php endif; ?>
-                            </div>
-                            
-                            <!-- Operatore responsabile -->
-                            <div class="info-group">
-                                <div class="info-label">Operatore Responsabile</div>
-                                <?php if ($cliente['operatore_nome']): ?>
-                                    <div class="info-value">
-                                        👤 <?= htmlspecialchars($cliente['operatore_nome']) ?>
-                                    </div>
-                                    <?php if ($cliente['operatore_email']): ?>
-                                        <div class="info-value" style="font-size: 0.75rem;">
-                                            📧 <?= htmlspecialchars($cliente['operatore_email']) ?>
-                                        </div>
-                                    <?php endif; ?>
-                                <?php else: ?>
-                                    <div class="info-value empty">Non assegnato</div>
-                                <?php endif; ?>
-                            </div>
-                        </div>
-                        
-                        <?php if ($cliente['note']): ?>
-                            <div class="note-section">
-                                <div class="note-label">Note</div>
-                                <div class="note-text"><?= nl2br(htmlspecialchars($cliente['note'])) ?></div>
-                            </div>
-                        <?php endif; ?>
                     </div>
                     
                     <!-- Statistiche -->
                     <div class="stats-grid">
                         <div class="stat-card">
                             <div class="stat-icon">📋</div>
-                            <div class="stat-value"><?= $stats['pratiche_totali'] ?></div>
-                            <div class="stat-label">Pratiche Totali</div>
-                            <?php if ($stats['pratiche_attive'] > 0): ?>
-                                <div style="color: var(--color-success); font-size: 0.75rem; margin-top: 0.25rem;">
-                                    <?= $stats['pratiche_attive'] ?> attive
-                                </div>
-                            <?php endif; ?>
+                            <div class="stat-value"><?= $stats['pratiche_attive'] ?></div>
+                            <div class="stat-label">Pratiche Attive</div>
                         </div>
-                        
                         <div class="stat-card">
                             <div class="stat-icon">📁</div>
                             <div class="stat-value"><?= $stats['documenti_totali'] ?></div>
                             <div class="stat-label">Documenti</div>
                         </div>
-                        
                         <div class="stat-card">
                             <div class="stat-icon">💬</div>
                             <div class="stat-value"><?= $stats['comunicazioni_totali'] ?></div>
                             <div class="stat-label">Comunicazioni</div>
                         </div>
-                        
                         <div class="stat-card">
                             <div class="stat-icon">📅</div>
                             <div class="stat-value">
-                                <?php
-                                $giorni = floor((time() - strtotime($cliente['created_at'])) / 86400);
-                                echo $giorni;
-                                ?>
+                                <?php if ($stats['ultima_comunicazione']): ?>
+                                    <?= date('d/m', strtotime($stats['ultima_comunicazione'])) ?>
+                                <?php else: ?>
+                                    -
+                                <?php endif; ?>
                             </div>
-                            <div class="stat-label">Giorni da Acquisizione</div>
+                            <div class="stat-label">Ultimo Contatto</div>
                         </div>
                     </div>
                     
-                    <!-- Content Sections -->
-                    <div class="content-sections">
-                        <!-- Documenti Recenti -->
-                        <div class="section-card">
+                    <!-- Info sections -->
+                    <div class="info-grid">
+                        <!-- Dati fiscali -->
+                        <div class="info-section">
                             <div class="section-header">
-                                <h3 class="section-title">
-                                    📁 Documenti Recenti
-                                </h3>
-                                <a href="/crm/?action=clienti&view=documenti&id=<?= $clienteId ?>" class="btn-action" style="font-size: 0.75rem; padding: 0.25rem 0.5rem;">
-                                    Vedi tutti
-                                </a>
+                                <span>🧾</span>
+                                <span>Dati Fiscali</span>
                             </div>
                             <div class="section-content">
-                                <?php if (empty($documentiRecenti)): ?>
-                                    <div class="empty-state">
-                                        <p>Nessun documento caricato</p>
-                                        <a href="/crm/?action=clienti&view=documenti&id=<?= $clienteId ?>" class="btn-action primary" style="margin-top: 1rem;">
-                                            📤 Carica Documento
-                                        </a>
-                                    </div>
-                                <?php else: ?>
-                                    <?php foreach ($documentiRecenti as $doc): ?>
-                                        <div class="list-item">
-                                            <div class="list-item-header">
-                                                <div class="list-item-title">
-                                                    <?= getCategoriaDocIcon($doc['categoria']) ?>
-                                                    <?= htmlspecialchars($doc['nome_file_originale']) ?>
-                                                </div>
-                                                <div class="list-item-meta">
-                                                    <?= date('d/m/Y', strtotime($doc['data_upload'])) ?>
-                                                </div>
-                                            </div>
-                                            <div class="list-item-description">
-                                                Caricato da <?= htmlspecialchars($doc['operatore_nome'] ?? 'Sistema') ?>
-                                                <?php if ($doc['note']): ?>
-                                                    • <?= htmlspecialchars($doc['note']) ?>
-                                                <?php endif; ?>
-                                            </div>
-                                        </div>
-                                    <?php endforeach; ?>
+                                <?php if ($cliente['codice_fiscale']): ?>
+                                <div class="info-row">
+                                    <span class="info-label">Codice Fiscale</span>
+                                    <span class="info-value"><?= htmlspecialchars($cliente['codice_fiscale']) ?></span>
+                                </div>
+                                <?php endif; ?>
+                                
+                                <?php if ($cliente['partita_iva']): ?>
+                                <div class="info-row">
+                                    <span class="info-label">Partita IVA</span>
+                                    <span class="info-value"><?= htmlspecialchars($cliente['partita_iva']) ?></span>
+                                </div>
+                                <?php endif; ?>
+                                
+                                <?php if ($cliente['codice_univoco']): ?>
+                                <div class="info-row">
+                                    <span class="info-label">Codice SDI</span>
+                                    <span class="info-value"><?= htmlspecialchars($cliente['codice_univoco']) ?></span>
+                                </div>
+                                <?php endif; ?>
+                                
+                                <?php if (!$cliente['codice_fiscale'] && !$cliente['partita_iva'] && !$cliente['codice_univoco']): ?>
+                                <div class="empty-state">
+                                    <div class="empty-state-icon">📋</div>
+                                    <p>Nessun dato fiscale inserito</p>
+                                </div>
                                 <?php endif; ?>
                             </div>
                         </div>
                         
-                        <!-- Comunicazioni Recenti -->
-                        <div class="section-card">
+                        <!-- Recapiti -->
+                        <div class="info-section">
                             <div class="section-header">
-                                <h3 class="section-title">
-                                    💬 Comunicazioni Recenti
-                                </h3>
-                                <a href="/crm/?action=clienti&view=comunicazioni&id=<?= $clienteId ?>" class="btn-action" style="font-size: 0.75rem; padding: 0.25rem 0.5rem;">
-                                    Vedi tutte
-                                </a>
+                                <span>📍</span>
+                                <span>Recapiti</span>
                             </div>
                             <div class="section-content">
-                                <?php if (empty($comunicazioniRecenti)): ?>
-                                    <div class="empty-state">
-                                        <p>Nessuna comunicazione registrata</p>
-                                        <a href="/crm/?action=clienti&view=comunicazioni&id=<?= $clienteId ?>" class="btn-action primary" style="margin-top: 1rem;">
-                                            ➕ Nuova Comunicazione
+                                <?php if ($cliente['indirizzo'] || $cliente['citta']): ?>
+                                <div class="info-row">
+                                    <span class="info-label">Indirizzo</span>
+                                    <span class="info-value">
+                                        <?= htmlspecialchars($cliente['indirizzo']) ?>
+                                        <?php if ($cliente['cap'] || $cliente['citta']): ?>
+                                            <br><?= htmlspecialchars($cliente['cap']) ?> <?= htmlspecialchars($cliente['citta']) ?>
+                                            <?php if ($cliente['provincia']): ?>(<?= htmlspecialchars($cliente['provincia']) ?>)<?php endif; ?>
+                                        <?php endif; ?>
+                                    </span>
+                                </div>
+                                <?php endif; ?>
+                                
+                                <?php if ($cliente['telefono']): ?>
+                                <div class="info-row">
+                                    <span class="info-label">Telefono</span>
+                                    <span class="info-value">
+                                        <a href="tel:<?= htmlspecialchars($cliente['telefono']) ?>" style="color: inherit; text-decoration: none;">
+                                            <?= htmlspecialchars($cliente['telefono']) ?>
                                         </a>
-                                    </div>
-                                <?php else: ?>
-                                    <?php foreach ($comunicazioniRecenti as $comm): ?>
-                                        <div class="list-item">
-                                            <div class="list-item-header">
-                                                <div class="list-item-title">
-                                                    <?php
-                                                    $tipoIcon = [
-                                                        'email' => '📧',
-                                                        'telefono' => '📞',
-                                                        'incontro' => '🤝',
-                                                        'nota' => '📝'
-                                                    ];
-                                                    echo $tipoIcon[$comm['tipo']] ?? '💬';
-                                                    ?>
-                                                    <?= htmlspecialchars($comm['oggetto']) ?>
-                                                </div>
-                                                <div class="list-item-meta">
-                                                    <?= date('d/m/Y H:i', strtotime($comm['created_at'])) ?>
-                                                </div>
-                                            </div>
-                                            <div class="list-item-description">
-                                                <?= htmlspecialchars(substr($comm['contenuto'], 0, 100)) ?>
-                                                <?= strlen($comm['contenuto']) > 100 ? '...' : '' ?>
-                                            </div>
-                                        </div>
-                                    <?php endforeach; ?>
+                                    </span>
+                                </div>
+                                <?php endif; ?>
+                                
+                                <?php if ($cliente['email']): ?>
+                                <div class="info-row">
+                                    <span class="info-label">Email</span>
+                                    <span class="info-value">
+                                        <a href="mailto:<?= htmlspecialchars($cliente['email']) ?>" style="color: inherit; text-decoration: none;">
+                                            <?= htmlspecialchars($cliente['email']) ?>
+                                        </a>
+                                    </span>
+                                </div>
+                                <?php endif; ?>
+                                
+                                <?php if ($cliente['pec']): ?>
+                                <div class="info-row">
+                                    <span class="info-label">PEC</span>
+                                    <span class="info-value">
+                                        <a href="mailto:<?= htmlspecialchars($cliente['pec']) ?>" style="color: inherit; text-decoration: none;">
+                                            <?= htmlspecialchars($cliente['pec']) ?>
+                                        </a>
+                                    </span>
+                                </div>
+                                <?php endif; ?>
+                                
+                                <?php if (!$cliente['indirizzo'] && !$cliente['telefono'] && !$cliente['email'] && !$cliente['pec']): ?>
+                                <div class="empty-state">
+                                    <div class="empty-state-icon">📍</div>
+                                    <p>Nessun recapito inserito</p>
+                                </div>
+                                <?php endif; ?>
+                            </div>
+                        </div>
+                        
+                        <!-- Info gestionali -->
+                        <div class="info-section">
+                            <div class="section-header">
+                                <span>⚙️</span>
+                                <span>Informazioni Gestionali</span>
+                            </div>
+                            <div class="section-content">
+                                <div class="info-row">
+                                    <span class="info-label">Operatore Responsabile</span>
+                                    <span class="info-value"><?= htmlspecialchars($cliente['operatore_nome'] ?? 'Non assegnato') ?></span>
+                                </div>
+                                
+                                <div class="info-row">
+                                    <span class="info-label">Cliente dal</span>
+                                    <span class="info-value"><?= date('d/m/Y', strtotime($cliente['created_at'])) ?></span>
+                                </div>
+                                
+                                <?php if ($cliente['updated_at']): ?>
+                                <div class="info-row">
+                                    <span class="info-label">Ultima modifica</span>
+                                    <span class="info-value"><?= date('d/m/Y H:i', strtotime($cliente['updated_at'])) ?></span>
+                                </div>
                                 <?php endif; ?>
                             </div>
                         </div>
                     </div>
                     
-                    <!-- Pratiche Associate -->
-                    <?php if (!empty($pratiche)): ?>
-                        <div class="section-card" style="margin-top: 2rem;">
-                            <div class="section-header">
-                                <h3 class="section-title">
-                                    📋 Pratiche Associate
-                                </h3>
-                                <a href="/crm/?action=pratiche&cliente_id=<?= $clienteId ?>" class="btn-action" style="font-size: 0.75rem; padding: 0.25rem 0.5rem;">
-                                    Vedi tutte
-                                </a>
-                            </div>
-                            <div class="section-content">
-                                <div style="overflow-x: auto;">
-                                    <table style="width: 100%; font-size: 0.875rem;">
-                                        <thead>
-                                            <tr style="border-bottom: 2px solid var(--gray-200);">
-                                                <th style="text-align: left; padding: 0.5rem;">Codice</th>
-                                                <th style="text-align: left; padding: 0.5rem;">Tipo</th>
-                                                <th style="text-align: left; padding: 0.5rem;">Oggetto</th>
-                                                <th style="text-align: left; padding: 0.5rem;">Stato</th>
-                                                <th style="text-align: left; padding: 0.5rem;">Data</th>
-                                            </tr>
-                                        </thead>
-                                        <tbody>
-                                            <?php foreach ($pratiche as $pratica): ?>
-                                                <tr style="border-bottom: 1px solid var(--gray-100);">
-                                                    <td style="padding: 0.5rem;">
-                                                        <a href="/crm/?action=pratiche&view=view&id=<?= $pratica['id'] ?>" style="color: var(--primary-green); text-decoration: none;">
-                                                            #<?= str_pad($pratica['id'], 6, '0', STR_PAD_LEFT) ?>
-                                                        </a>
-                                                    </td>
-                                                    <td style="padding: 0.5rem;">
-                                                        <?= htmlspecialchars($pratica['tipo_pratica_nome'] ?? 'N/A') ?>
-                                                    </td>
-                                                    <td style="padding: 0.5rem;">
-                                                        <?= htmlspecialchars($pratica['oggetto']) ?>
-                                                    </td>
-                                                    <td style="padding: 0.5rem;">
-                                                        <span class="status-badge status-<?= $pratica['stato'] ?>">
-                                                            <?= ucfirst($pratica['stato']) ?>
-                                                        </span>
-                                                    </td>
-                                                    <td style="padding: 0.5rem;">
-                                                        <?= date('d/m/Y', strtotime($pratica['created_at'])) ?>
-                                                    </td>
-                                                </tr>
-                                            <?php endforeach; ?>
-                                        </tbody>
-                                    </table>
-                                </div>
-                            </div>
+                    <!-- Note -->
+                    <?php if ($cliente['note']): ?>
+                    <div class="info-section" style="margin-bottom: 1.5rem;">
+                        <div class="section-header">
+                            <span>📝</span>
+                            <span>Note</span>
                         </div>
+                        <div class="section-content">
+                            <p style="margin: 0; white-space: pre-wrap;"><?= htmlspecialchars($cliente['note']) ?></p>
+                        </div>
+                    </div>
                     <?php endif; ?>
+                    
+                    <!-- Ultime comunicazioni -->
+                    <div class="info-section">
+                        <div class="section-header">
+                            <span>💬</span>
+                            <span>Ultime Comunicazioni</span>
+                            <a href="/crm/?action=clienti&view=comunicazioni&id=<?= $clienteId ?>" 
+                               style="margin-left: auto; font-size: 0.875rem; color: var(--primary-green); text-decoration: none;">
+                                Vedi tutte →
+                            </a>
+                        </div>
+                        <div class="timeline">
+                            <?php if (empty($ultimeComunicazioni)): ?>
+                                <div class="empty-state">
+                                    <div class="empty-state-icon">💬</div>
+                                    <p>Nessuna comunicazione registrata</p>
+                                    <a href="/crm/?action=clienti&view=comunicazioni&id=<?= $clienteId ?>" 
+                                       class="btn btn-primary" style="margin-top: 1rem;">
+                                        Aggiungi comunicazione
+                                    </a>
+                                </div>
+                            <?php else: ?>
+                                <?php foreach ($ultimeComunicazioni as $com): ?>
+                                    <div class="timeline-item">
+                                        <div class="timeline-icon">
+                                            <?= getTipoComunicazioneIcon($com['tipo']) ?>
+                                        </div>
+                                        <div class="timeline-content">
+                                            <div class="timeline-title">
+                                                <?= htmlspecialchars($com['oggetto']) ?>
+                                            </div>
+                                            <div class="timeline-meta">
+                                                <?= date('d/m/Y H:i', strtotime($com['created_at'])) ?> • 
+                                                <?= htmlspecialchars($com['operatore_nome']) ?>
+                                            </div>
+                                        </div>
+                                    </div>
+                                <?php endforeach; ?>
+                            <?php endif; ?>
+                        </div>
+                    </div>
                 </div>
             </main>
         </div>
     </div>
-
-    <!-- Script microinterazioni -->
-    <script src="/crm/assets/js/microinteractions.js"></script>
 </body>
 </html>

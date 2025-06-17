@@ -2,13 +2,14 @@
 /**
  * modules/clienti/comunicazioni.php - Gestione Comunicazioni Cliente CRM Re.De Consulting
  * 
- * ✅ VERSIONE CON SIDEBAR E HEADER CENTRALIZZATI
+ * ✅ VERSIONE DEFINITIVA CON COMPONENTI CENTRALIZZATI
+ * ✅ LAYOUT ULTRA-COMPATTO DATEV OPTIMAL
  * 
  * Features:
  * - Timeline comunicazioni
  * - Inserimento note, email, telefonate
  * - Filtri per tipo comunicazione
- * - Storico completo interazioni
+ * - Design Datev Optimal
  */
 
 // Avvia sessione se non già attiva
@@ -48,6 +49,12 @@ $tipiComunicazione = [
     'nota' => ['label' => '📝 Nota interna', 'icon' => '📝']
 ];
 
+// Gestione filtri
+$filtroTipo = $_GET['tipo'] ?? 'all';
+$filtroPeriodo = $_GET['periodo'] ?? '30';
+$page = max(1, intval($_GET['page'] ?? 1));
+$perPage = 20;
+
 // Gestione form submission
 $errors = [];
 $success = '';
@@ -59,47 +66,43 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
             $tipo = $_POST['tipo'] ?? '';
             $oggetto = trim($_POST['oggetto'] ?? '');
             $contenuto = trim($_POST['contenuto'] ?? '');
-            $data_comunicazione = $_POST['data_comunicazione'] ?? date('Y-m-d H:i');
+            $data_comunicazione = $_POST['data_comunicazione'] ?? date('Y-m-d H:i:s');
             
             if (!array_key_exists($tipo, $tipiComunicazione)) {
                 $errors[] = "Tipo comunicazione non valido";
             }
             
             if (empty($oggetto)) {
-                $errors[] = "L'oggetto è obbligatorio";
+                $errors[] = "Oggetto obbligatorio";
             }
             
             if (empty($contenuto)) {
-                $errors[] = "Il contenuto è obbligatorio";
-            }
-            
-            // Converti data in formato corretto
-            try {
-                $dataCom = new DateTime($data_comunicazione);
-                $dataFormatted = $dataCom->format('Y-m-d H:i:s');
-            } catch (Exception $e) {
-                $errors[] = "Data non valida";
+                $errors[] = "Contenuto obbligatorio";
             }
             
             if (empty($errors)) {
                 try {
-                    $db->insert('comunicazioni_clienti', [
+                    $id = $db->insert('comunicazioni_clienti', [
                         'cliente_id' => $clienteId,
                         'operatore_id' => $sessionInfo['operatore_id'],
                         'tipo' => $tipo,
                         'oggetto' => $oggetto,
                         'contenuto' => $contenuto,
-                        'data_comunicazione' => $dataFormatted,
+                        'data_comunicazione' => $data_comunicazione,
                         'created_at' => date('Y-m-d H:i:s')
                     ]);
                     
-                    $success = '✅ Comunicazione registrata con successo';
-                    
-                    // Reset form
-                    $_POST = [];
+                    if ($id) {
+                        $success = '✅ Comunicazione registrata con successo';
+                        
+                        // Svuota form
+                        $_POST = [];
+                    } else {
+                        $errors[] = "Errore durante il salvataggio";
+                    }
                 } catch (Exception $e) {
                     error_log("Errore inserimento comunicazione: " . $e->getMessage());
-                    $errors[] = "Errore durante il salvataggio";
+                    $errors[] = "Errore di sistema";
                 }
             }
             break;
@@ -108,8 +111,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
             $comunicazioneId = (int)($_POST['comunicazione_id'] ?? 0);
             if ($comunicazioneId && $sessionInfo['is_admin']) {
                 try {
-                    $db->delete('comunicazioni_clienti', 'id = ? AND cliente_id = ?', [$comunicazioneId, $clienteId]);
-                    $success = '✅ Comunicazione eliminata';
+                    $success = $db->delete('comunicazioni_clienti', 'id = ? AND cliente_id = ?', [$comunicazioneId, $clienteId]);
+                    if ($success) {
+                        $_SESSION['success_message'] = '✅ Comunicazione eliminata';
+                        header('Location: /crm/?action=clienti&view=comunicazioni&id=' . $clienteId);
+                        exit;
+                    }
                 } catch (Exception $e) {
                     $errors[] = "Errore durante l'eliminazione";
                 }
@@ -118,79 +125,74 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
     }
 }
 
-// Carica comunicazioni con filtri
-$filtroTipo = $_GET['tipo'] ?? '';
-$filtroMese = $_GET['mese'] ?? '';
-
-$whereConditions = ['cc.cliente_id = ?'];
+// Query comunicazioni con filtri
+$whereConditions = ["cliente_id = ?"];
 $params = [$clienteId];
 
-if ($filtroTipo && array_key_exists($filtroTipo, $tipiComunicazione)) {
-    $whereConditions[] = 'cc.tipo = ?';
+if ($filtroTipo !== 'all') {
+    $whereConditions[] = "tipo = ?";
     $params[] = $filtroTipo;
 }
 
-if ($filtroMese && preg_match('/^\d{4}-\d{2}$/', $filtroMese)) {
-    $whereConditions[] = 'DATE_FORMAT(cc.data_comunicazione, "%Y-%m") = ?';
-    $params[] = $filtroMese;
+if ($filtroPeriodo !== 'all') {
+    $whereConditions[] = "DATE(data_comunicazione) >= DATE_SUB(CURDATE(), INTERVAL ? DAY)";
+    $params[] = $filtroPeriodo;
 }
 
 $whereClause = implode(' AND ', $whereConditions);
 
+// Conta totale per paginazione
+$totalCount = 0;
+try {
+    $totalCount = $db->count('comunicazioni_clienti', $whereClause, $params);
+} catch (Exception $e) {
+    error_log("Errore conteggio comunicazioni: " . $e->getMessage());
+}
+
+$totalPages = ceil($totalCount / $perPage);
+$offset = ($page - 1) * $perPage;
+
+// Carica comunicazioni
+$comunicazioni = [];
 try {
     $comunicazioni = $db->select("
-        SELECT 
-            cc.*,
-            CONCAT(o.nome, ' ', o.cognome) as operatore_nome
+        SELECT cc.*, 
+               CONCAT(o.nome, ' ', o.cognome) as operatore_nome,
+               o.id as operatore_id
         FROM comunicazioni_clienti cc
         LEFT JOIN operatori o ON cc.operatore_id = o.id
         WHERE $whereClause
-        ORDER BY cc.data_comunicazione DESC
+        ORDER BY cc.data_comunicazione DESC, cc.created_at DESC
+        LIMIT $perPage OFFSET $offset
     ", $params);
-    
-    // Statistiche per tipo
-    $statsTipo = $db->select("
+} catch (Exception $e) {
+    error_log("Errore caricamento comunicazioni: " . $e->getMessage());
+}
+
+// Statistiche
+$stats = [
+    'totali' => $totalCount,
+    'email' => 0,
+    'telefono' => 0,
+    'incontro' => 0,
+    'nota' => 0
+];
+
+try {
+    $statsData = $db->select("
         SELECT tipo, COUNT(*) as count
         FROM comunicazioni_clienti
         WHERE cliente_id = ?
         GROUP BY tipo
     ", [$clienteId]);
     
-    $statsByType = [];
-    foreach ($statsTipo as $stat) {
-        $statsByType[$stat['tipo']] = $stat['count'];
+    foreach ($statsData as $stat) {
+        if (isset($stats[$stat['tipo']])) {
+            $stats[$stat['tipo']] = $stat['count'];
+        }
     }
-    
-    // Mesi disponibili per filtro
-    $mesiDisponibili = $db->select("
-        SELECT DISTINCT DATE_FORMAT(data_comunicazione, '%Y-%m') as mese,
-               DATE_FORMAT(data_comunicazione, '%M %Y') as mese_label
-        FROM comunicazioni_clienti
-        WHERE cliente_id = ?
-        ORDER BY mese DESC
-        LIMIT 12
-    ", [$clienteId]);
-    
 } catch (Exception $e) {
-    error_log("Errore caricamento comunicazioni: " . $e->getMessage());
-    $comunicazioni = [];
-}
-
-// Helper per formattare date
-function formatDataComunicazione($data) {
-    $date = new DateTime($data);
-    $now = new DateTime();
-    $diff = $now->diff($date);
-    
-    if ($diff->days == 0) {
-        return 'Oggi alle ' . $date->format('H:i');
-    } elseif ($diff->days == 1) {
-        return 'Ieri alle ' . $date->format('H:i');
-    } elseif ($diff->days < 7) {
-        return $diff->days . ' giorni fa';
-    } else {
-        return $date->format('d/m/Y H:i');
-    }
+    error_log("Errore statistiche comunicazioni: " . $e->getMessage());
 }
 ?>
 <!DOCTYPE html>
@@ -198,280 +200,142 @@ function formatDataComunicazione($data) {
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Comunicazioni - <?= htmlspecialchars($cliente['ragione_sociale']) ?> - CRM Re.De</title>
+    <title><?= $pageTitle ?> - <?= htmlspecialchars($cliente['ragione_sociale']) ?> - CRM Re.De</title>
     
-    <!-- CSS nell'ordine corretto -->
+    <!-- CSS Files -->
     <link rel="stylesheet" href="/crm/assets/css/design-system.css">
-    <link rel="stylesheet" href="/crm/assets/css/datev-style.css">
+    <link rel="stylesheet" href="/crm/assets/css/datev-optimal.css">
     <link rel="stylesheet" href="/crm/assets/css/clienti.css">
     
     <style>
+        /* Layout comunicazioni ultra-compatto */
         .comunicazioni-container {
-            padding: 2rem 1rem;
+            padding: 1.5rem;
             max-width: 1200px;
             margin: 0 auto;
         }
         
-        /* Breadcrumb */
-        .breadcrumb {
+        .comunicazioni-header {
             display: flex;
+            justify-content: space-between;
             align-items: center;
-            gap: 0.5rem;
-            margin-bottom: 2rem;
-            font-size: 0.875rem;
-            color: var(--gray-600);
-        }
-        
-        .breadcrumb a {
-            color: var(--primary-green);
-            text-decoration: none;
-            transition: color var(--transition-fast);
-        }
-        
-        .breadcrumb a:hover {
-            color: var(--primary-green-hover);
-        }
-        
-        .breadcrumb .separator {
-            color: var(--gray-400);
-        }
-        
-        .breadcrumb .current {
-            color: var(--gray-900);
-            font-weight: 500;
-        }
-        
-        /* Layout a due colonne */
-        .comunicazioni-layout {
-            display: grid;
-            grid-template-columns: 400px 1fr;
-            gap: 2rem;
-        }
-        
-        @media (max-width: 1024px) {
-            .comunicazioni-layout {
-                grid-template-columns: 1fr;
-            }
-        }
-        
-        /* Form nuova comunicazione */
-        .form-section {
-            background: white;
-            border-radius: var(--radius-lg);
-            padding: 1.5rem;
-            box-shadow: var(--shadow-md);
-            height: fit-content;
-        }
-        
-        .form-header {
-            font-size: 1.125rem;
-            font-weight: 600;
-            color: var(--gray-900);
             margin-bottom: 1.5rem;
-            display: flex;
-            align-items: center;
-            gap: 0.5rem;
-        }
-        
-        .form-group {
-            margin-bottom: 1rem;
-        }
-        
-        .form-label {
-            display: block;
-            font-size: 0.875rem;
-            font-weight: 500;
-            color: var(--gray-700);
-            margin-bottom: 0.25rem;
-        }
-        
-        .form-input, .form-select, .form-textarea {
-            width: 100%;
-            padding: 0.5rem 0.75rem;
-            font-size: 0.875rem;
-            border: 1px solid var(--gray-300);
-            border-radius: var(--radius-md);
-            transition: all var(--transition-fast);
-        }
-        
-        .form-input:focus, .form-select:focus, .form-textarea:focus {
-            outline: none;
-            border-color: var(--primary-green);
-            box-shadow: 0 0 0 3px rgba(0, 120, 73, 0.1);
-        }
-        
-        .form-textarea {
-            resize: vertical;
-            min-height: 100px;
-        }
-        
-        .tipo-selector {
-            display: grid;
-            grid-template-columns: 1fr 1fr;
-            gap: 0.5rem;
-            margin-bottom: 1rem;
-        }
-        
-        .tipo-option {
-            padding: 0.75rem;
-            border: 1px solid var(--gray-300);
-            border-radius: var(--radius-md);
-            text-align: center;
-            cursor: pointer;
-            transition: all var(--transition-fast);
-            font-size: 0.875rem;
-        }
-        
-        .tipo-option:hover {
-            border-color: var(--primary-green);
-            background: var(--gray-50);
-        }
-        
-        .tipo-option input[type="radio"] {
-            display: none;
-        }
-        
-        .tipo-option input[type="radio"]:checked + label {
-            background: var(--primary-green);
-            color: white;
-            border-color: var(--primary-green);
-        }
-        
-        /* Timeline comunicazioni */
-        .timeline-section {
-            background: white;
-            border-radius: var(--radius-lg);
-            box-shadow: var(--shadow-sm);
-            overflow: hidden;
-        }
-        
-        .timeline-header {
-            padding: 1.5rem;
-            background: var(--gray-50);
+            padding-bottom: 1rem;
             border-bottom: 1px solid var(--gray-200);
         }
         
-        .timeline-title {
-            font-size: 1.125rem;
-            font-weight: 600;
+        .header-info h1 {
+            font-size: 1.5rem;
             color: var(--gray-900);
+            margin: 0 0 0.25rem 0;
+        }
+        
+        .header-info p {
+            color: var(--gray-600);
+            margin: 0;
+            font-size: 0.875rem;
+        }
+        
+        .add-form {
+            background: white;
+            border-radius: 8px;
+            box-shadow: 0 1px 3px rgba(0, 0, 0, 0.05);
+            padding: 1.5rem;
+            margin-bottom: 1.5rem;
+        }
+        
+        .form-row {
+            display: grid;
+            grid-template-columns: 150px 1fr;
+            gap: 1rem;
             margin-bottom: 1rem;
         }
         
-        /* Filtri */
-        .filters-row {
+        .form-row-full {
+            grid-template-columns: 1fr;
+        }
+        
+        .filters-bar {
+            background: white;
+            padding: 1rem;
+            border-radius: 8px;
+            box-shadow: 0 1px 3px rgba(0, 0, 0, 0.05);
+            margin-bottom: 1rem;
             display: flex;
-            gap: 0.5rem;
+            gap: 1rem;
+            align-items: center;
             flex-wrap: wrap;
         }
         
-        .filter-badge {
-            padding: 0.25rem 0.75rem;
-            background: var(--gray-100);
-            border-radius: var(--radius-full);
-            font-size: 0.75rem;
-            cursor: pointer;
-            transition: all var(--transition-fast);
-            text-decoration: none;
-            color: var(--gray-700);
-            display: inline-flex;
-            align-items: center;
-            gap: 0.25rem;
+        .stats-mini {
+            display: flex;
+            gap: 1rem;
+            margin-left: auto;
+            font-size: 0.813rem;
         }
         
-        .filter-badge:hover {
-            background: var(--gray-200);
-        }
-        
-        .filter-badge.active {
-            background: var(--primary-green);
-            color: white;
-        }
-        
-        .filter-count {
-            background: rgba(0, 0, 0, 0.1);
-            padding: 0.125rem 0.375rem;
-            border-radius: var(--radius-full);
-            font-size: 0.625rem;
-            margin-left: 0.25rem;
-        }
-        
-        /* Timeline items */
-        .timeline-content {
-            padding: 1rem;
-            max-height: 600px;
-            overflow-y: auto;
-        }
-        
-        .timeline-item {
-            position: relative;
-            padding-left: 3rem;
-            padding-bottom: 2rem;
-            border-left: 2px solid var(--gray-200);
-            margin-left: 1rem;
-        }
-        
-        .timeline-item:last-child {
-            border-left: none;
-            padding-bottom: 0;
-        }
-        
-        .timeline-icon {
-            position: absolute;
-            left: -1.25rem;
-            top: 0;
-            width: 2.5rem;
-            height: 2.5rem;
-            background: white;
-            border: 2px solid var(--gray-300);
-            border-radius: 50%;
+        .stat-mini {
             display: flex;
             align-items: center;
-            justify-content: center;
-            font-size: 1rem;
-        }
-        
-        .timeline-date {
-            font-size: 0.75rem;
+            gap: 0.25rem;
             color: var(--gray-600);
-            margin-bottom: 0.5rem;
-            font-weight: 500;
         }
         
-        .timeline-card {
+        .comunicazioni-list {
+            background: white;
+            border-radius: 8px;
+            box-shadow: 0 1px 3px rgba(0, 0, 0, 0.05);
+            overflow: hidden;
+        }
+        
+        .comunicazione-item {
+            padding: 1.25rem;
+            border-bottom: 1px solid var(--gray-100);
+            transition: background 0.2s;
+        }
+        
+        .comunicazione-item:hover {
             background: var(--gray-50);
-            border-radius: var(--radius-lg);
-            padding: 1rem;
-            border: 1px solid var(--gray-200);
         }
         
-        .timeline-card-header {
+        .comunicazione-item:last-child {
+            border-bottom: none;
+        }
+        
+        .comunicazione-header {
             display: flex;
             justify-content: space-between;
             align-items: flex-start;
-            margin-bottom: 0.5rem;
+            margin-bottom: 0.75rem;
         }
         
-        .timeline-oggetto {
+        .comunicazione-tipo {
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+        }
+        
+        .tipo-icon {
+            font-size: 1.25rem;
+        }
+        
+        .tipo-info {
+            display: flex;
+            flex-direction: column;
+        }
+        
+        .tipo-label {
             font-weight: 600;
             color: var(--gray-900);
             font-size: 0.875rem;
         }
         
-        .timeline-operatore {
+        .tipo-meta {
             font-size: 0.75rem;
             color: var(--gray-600);
         }
         
-        .timeline-contenuto {
-            font-size: 0.875rem;
-            color: var(--gray-700);
-            white-space: pre-wrap;
-            margin-top: 0.5rem;
-        }
-        
-        .timeline-actions {
-            margin-top: 0.5rem;
+        .comunicazione-actions {
             display: flex;
             gap: 0.5rem;
         }
@@ -479,99 +343,67 @@ function formatDataComunicazione($data) {
         .btn-small {
             padding: 0.25rem 0.5rem;
             font-size: 0.75rem;
-            background: var(--gray-100);
+            border-radius: 4px;
+        }
+        
+        .comunicazione-oggetto {
+            font-weight: 500;
+            color: var(--gray-800);
+            margin-bottom: 0.5rem;
+        }
+        
+        .comunicazione-contenuto {
             color: var(--gray-700);
-            border: 1px solid var(--gray-300);
-            border-radius: var(--radius-sm);
-            cursor: pointer;
-            transition: all var(--transition-fast);
+            font-size: 0.875rem;
+            line-height: 1.5;
+            white-space: pre-wrap;
         }
         
-        .btn-small:hover {
-            background: var(--gray-200);
-            border-color: var(--gray-400);
-        }
-        
-        .btn-danger {
-            color: var(--color-danger);
-        }
-        
-        .btn-danger:hover {
-            background: var(--color-danger-light);
-            border-color: var(--color-danger);
-        }
-        
-        /* Empty state */
         .empty-state {
             text-align: center;
             padding: 3rem;
-            color: var(--gray-500);
+            color: var(--gray-600);
         }
         
-        /* Quick actions */
-        .quick-actions {
-            display: flex;
-            gap: 0.5rem;
-            margin-top: 1rem;
-            padding-top: 1rem;
-            border-top: 1px solid var(--gray-200);
-        }
-        
-        .quick-action {
-            flex: 1;
-            padding: 0.5rem;
-            background: var(--gray-50);
-            border: 1px solid var(--gray-200);
-            border-radius: var(--radius-md);
-            text-align: center;
-            font-size: 0.75rem;
-            color: var(--gray-700);
-            text-decoration: none;
-            transition: all var(--transition-fast);
-        }
-        
-        .quick-action:hover {
-            background: var(--gray-100);
-            border-color: var(--primary-green);
-            color: var(--primary-green);
-        }
-        
-        /* Buttons */
-        .btn-submit {
-            width: 100%;
-            padding: 0.75rem;
-            background: var(--primary-green);
-            color: white;
-            border: none;
-            border-radius: var(--radius-md);
-            font-weight: 500;
-            cursor: pointer;
-            transition: all var(--transition-fast);
-        }
-        
-        .btn-submit:hover {
-            background: var(--primary-green-hover);
-            transform: translateY(-1px);
-        }
-        
-        /* Alert messages */
-        .alert {
-            padding: 0.75rem 1rem;
-            border-radius: var(--radius-md);
+        .empty-state-icon {
+            font-size: 3rem;
             margin-bottom: 1rem;
-            font-size: 0.875rem;
         }
         
-        .alert-success {
-            background: var(--color-success-light);
-            color: var(--color-success);
-            border: 1px solid var(--color-success);
+        .toggle-form {
+            cursor: pointer;
+            user-select: none;
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+            color: var(--primary-green);
+            font-weight: 500;
+            margin-bottom: 1rem;
         }
         
-        .alert-danger {
-            background: var(--color-danger-light);
-            color: var(--color-danger);
-            border: 1px solid var(--color-danger);
+        .toggle-form:hover {
+            color: var(--primary-green-hover);
+        }
+        
+        @media (max-width: 768px) {
+            .comunicazioni-header {
+                flex-direction: column;
+                gap: 1rem;
+            }
+            
+            .filters-bar {
+                flex-direction: column;
+                align-items: stretch;
+            }
+            
+            .stats-mini {
+                margin-left: 0;
+                justify-content: space-around;
+            }
+            
+            .form-row {
+                grid-template-columns: 1fr;
+            }
         }
     </style>
 </head>
@@ -586,23 +418,25 @@ function formatDataComunicazione($data) {
             
             <main class="main-content">
                 <div class="comunicazioni-container">
-                    <!-- Breadcrumb -->
-                    <nav class="breadcrumb">
-                        <a href="/crm/">Home</a>
-                        <span class="separator">/</span>
-                        <a href="/crm/?action=clienti">Clienti</a>
-                        <span class="separator">/</span>
-                        <a href="/crm/?action=clienti&view=view&id=<?= $clienteId ?>">
-                            <?= htmlspecialchars($cliente['ragione_sociale']) ?>
-                        </a>
-                        <span class="separator">/</span>
-                        <span class="current">Comunicazioni</span>
-                    </nav>
-
+                    <!-- Header -->
+                    <div class="comunicazioni-header">
+                        <div class="header-info">
+                            <h1><?= htmlspecialchars($cliente['ragione_sociale']) ?></h1>
+                            <p>Registro comunicazioni e contatti</p>
+                        </div>
+                        <div class="header-actions">
+                            <a href="/crm/?action=clienti&view=view&id=<?= $clienteId ?>" class="btn btn-secondary">
+                                ← Torna al cliente
+                            </a>
+                        </div>
+                    </div>
+                    
                     <!-- Messaggi -->
                     <?php if (!empty($errors)): ?>
                         <div class="alert alert-danger">
-                            <?= implode('<br>', array_map('htmlspecialchars', $errors)) ?>
+                            <?php foreach ($errors as $error): ?>
+                                <p style="margin: 0;"><?= htmlspecialchars($error) ?></p>
+                            <?php endforeach; ?>
                         </div>
                     <?php endif; ?>
                     
@@ -611,229 +445,240 @@ function formatDataComunicazione($data) {
                             <?= htmlspecialchars($success) ?>
                         </div>
                     <?php endif; ?>
-
-                    <!-- Layout due colonne -->
-                    <div class="comunicazioni-layout">
-                        <!-- Form nuova comunicazione -->
-                        <div class="form-section">
-                            <h3 class="form-header">
-                                ➕ Nuova Comunicazione
-                            </h3>
+                    
+                    <!-- Form aggiunta -->
+                    <div class="add-form" id="addForm" style="display: none;">
+                        <h3 style="margin: 0 0 1rem 0; font-size: 1.125rem;">
+                            ➕ Nuova Comunicazione
+                        </h3>
+                        
+                        <form method="POST">
+                            <input type="hidden" name="action" value="add">
                             
-                            <form method="POST" action="/crm/?action=clienti&view=comunicazioni&id=<?= $clienteId ?>">
-                                <input type="hidden" name="action" value="add">
-                                
-                                <!-- Tipo comunicazione -->
-                                <div class="form-group">
-                                    <label class="form-label">Tipo di comunicazione</label>
-                                    <div class="tipo-selector">
-                                        <?php foreach ($tipiComunicazione as $value => $info): ?>
-                                            <div class="tipo-option">
-                                                <input type="radio" 
-                                                       id="tipo_<?= $value ?>" 
-                                                       name="tipo" 
-                                                       value="<?= $value ?>"
-                                                       <?= ($_POST['tipo'] ?? 'nota') == $value ? 'checked' : '' ?>>
-                                                <label for="tipo_<?= $value ?>">
-                                                    <?= $info['icon'] ?> <?= str_replace($info['icon'] . ' ', '', $info['label']) ?>
-                                                </label>
-                                            </div>
-                                        <?php endforeach; ?>
-                                    </div>
-                                </div>
-                                
-                                <!-- Data e ora -->
-                                <div class="form-group">
-                                    <label for="data_comunicazione" class="form-label">Data e ora</label>
-                                    <input type="datetime-local" 
-                                           id="data_comunicazione" 
-                                           name="data_comunicazione" 
-                                           class="form-input" 
-                                           value="<?= date('Y-m-d\TH:i') ?>">
-                                </div>
-                                
-                                <!-- Oggetto -->
-                                <div class="form-group">
-                                    <label for="oggetto" class="form-label">Oggetto</label>
-                                    <input type="text" 
-                                           id="oggetto" 
-                                           name="oggetto" 
-                                           class="form-input" 
-                                           placeholder="Breve descrizione..."
-                                           value="<?= htmlspecialchars($_POST['oggetto'] ?? '') ?>"
-                                           required>
-                                </div>
-                                
-                                <!-- Contenuto -->
-                                <div class="form-group">
-                                    <label for="contenuto" class="form-label">Contenuto</label>
-                                    <textarea id="contenuto" 
-                                              name="contenuto" 
-                                              class="form-textarea" 
-                                              placeholder="Dettagli della comunicazione..."
-                                              rows="5"
-                                              required><?= htmlspecialchars($_POST['contenuto'] ?? '') ?></textarea>
-                                </div>
-                                
-                                <button type="submit" class="btn-submit">
+                            <div class="form-row">
+                                <label class="form-label">Tipo</label>
+                                <select name="tipo" class="form-control" required>
+                                    <?php foreach ($tipiComunicazione as $value => $tipo): ?>
+                                        <option value="<?= $value ?>" <?= ($_POST['tipo'] ?? '') === $value ? 'selected' : '' ?>>
+                                            <?= $tipo['label'] ?>
+                                        </option>
+                                    <?php endforeach; ?>
+                                </select>
+                            </div>
+                            
+                            <div class="form-row">
+                                <label class="form-label">Data/Ora</label>
+                                <input type="datetime-local" 
+                                       name="data_comunicazione" 
+                                       class="form-control" 
+                                       value="<?= date('Y-m-d\TH:i') ?>"
+                                       required>
+                            </div>
+                            
+                            <div class="form-row">
+                                <label class="form-label">Oggetto</label>
+                                <input type="text" 
+                                       name="oggetto" 
+                                       class="form-control" 
+                                       placeholder="Breve descrizione..."
+                                       value="<?= htmlspecialchars($_POST['oggetto'] ?? '') ?>"
+                                       required>
+                            </div>
+                            
+                            <div class="form-row form-row-full">
+                                <label class="form-label">Contenuto</label>
+                                <textarea name="contenuto" 
+                                          class="form-control" 
+                                          rows="4" 
+                                          placeholder="Dettagli della comunicazione..."
+                                          required><?= htmlspecialchars($_POST['contenuto'] ?? '') ?></textarea>
+                            </div>
+                            
+                            <div style="display: flex; gap: 0.75rem; justify-content: flex-end;">
+                                <button type="button" class="btn btn-secondary" onclick="toggleForm()">
+                                    Annulla
+                                </button>
+                                <button type="submit" class="btn btn-primary">
                                     💾 Salva Comunicazione
                                 </button>
-                            </form>
-                            
-                            <!-- Quick actions -->
-                            <div class="quick-actions">
-                                <?php if ($cliente['email']): ?>
-                                    <a href="mailto:<?= htmlspecialchars($cliente['email']) ?>" 
-                                       class="quick-action">
-                                        📧 Invia Email
-                                    </a>
-                                <?php endif; ?>
-                                <?php if ($cliente['telefono']): ?>
-                                    <a href="tel:<?= htmlspecialchars($cliente['telefono']) ?>" 
-                                       class="quick-action">
-                                        📞 Chiama
-                                    </a>
-                                <?php endif; ?>
                             </div>
-                        </div>
+                        </form>
+                    </div>
+                    
+                    <div class="toggle-form" onclick="toggleForm()" id="toggleButton">
+                        <span>➕</span>
+                        <span>Aggiungi Comunicazione</span>
+                    </div>
+                    
+                    <!-- Filtri -->
+                    <div class="filters-bar">
+                        <form method="GET" style="display: flex; gap: 1rem; align-items: center; flex: 1;">
+                            <input type="hidden" name="action" value="clienti">
+                            <input type="hidden" name="view" value="comunicazioni">
+                            <input type="hidden" name="id" value="<?= $clienteId ?>">
+                            
+                            <select name="tipo" class="form-control" style="width: auto;">
+                                <option value="all">Tutti i tipi</option>
+                                <?php foreach ($tipiComunicazione as $value => $tipo): ?>
+                                    <option value="<?= $value ?>" <?= $filtroTipo === $value ? 'selected' : '' ?>>
+                                        <?= $tipo['label'] ?>
+                                    </option>
+                                <?php endforeach; ?>
+                            </select>
+                            
+                            <select name="periodo" class="form-control" style="width: auto;">
+                                <option value="7" <?= $filtroPeriodo == '7' ? 'selected' : '' ?>>Ultima settimana</option>
+                                <option value="30" <?= $filtroPeriodo == '30' ? 'selected' : '' ?>>Ultimo mese</option>
+                                <option value="90" <?= $filtroPeriodo == '90' ? 'selected' : '' ?>>Ultimi 3 mesi</option>
+                                <option value="365" <?= $filtroPeriodo == '365' ? 'selected' : '' ?>>Ultimo anno</option>
+                                <option value="all" <?= $filtroPeriodo == 'all' ? 'selected' : '' ?>>Tutto</option>
+                            </select>
+                            
+                            <button type="submit" class="btn btn-primary btn-small">
+                                Filtra
+                            </button>
+                        </form>
                         
-                        <!-- Timeline comunicazioni -->
-                        <div class="timeline-section">
-                            <div class="timeline-header">
-                                <h3 class="timeline-title">
-                                    💬 Storico Comunicazioni (<?= count($comunicazioni) ?>)
-                                </h3>
-                                
-                                <!-- Filtri -->
-                                <div class="filters-row">
-                                    <!-- Filtro tipo -->
-                                    <a href="/crm/?action=clienti&view=comunicazioni&id=<?= $clienteId ?>" 
-                                       class="filter-badge <?= !$filtroTipo ? 'active' : '' ?>">
-                                        Tutti
-                                        <span class="filter-count"><?= count($comunicazioni) ?></span>
-                                    </a>
-                                    
-                                    <?php foreach ($tipiComunicazione as $value => $info): ?>
-                                        <?php 
-                                        $count = $statsByType[$value] ?? 0;
-                                        $isActive = $filtroTipo === $value;
-                                        ?>
-                                        <a href="/crm/?action=clienti&view=comunicazioni&id=<?= $clienteId ?>&tipo=<?= $value ?>" 
-                                           class="filter-badge <?= $isActive ? 'active' : '' ?>">
-                                            <?= $info['icon'] ?>
-                                            <?php if ($count > 0): ?>
-                                                <span class="filter-count"><?= $count ?></span>
-                                            <?php endif; ?>
-                                        </a>
-                                    <?php endforeach; ?>
-                                    
-                                    <!-- Filtro mese -->
-                                    <?php if (!empty($mesiDisponibili)): ?>
-                                        <select onchange="window.location.href=this.value" 
-                                                style="font-size: 0.75rem; padding: 0.25rem 0.5rem; border-radius: var(--radius-full); border: 1px solid var(--gray-300);">
-                                            <option value="/crm/?action=clienti&view=comunicazioni&id=<?= $clienteId ?>">
-                                                Tutti i mesi
-                                            </option>
-                                            <?php foreach ($mesiDisponibili as $mese): ?>
-                                                <option value="/crm/?action=clienti&view=comunicazioni&id=<?= $clienteId ?>&mese=<?= $mese['mese'] ?>"
-                                                        <?= $filtroMese === $mese['mese'] ? 'selected' : '' ?>>
-                                                    <?= htmlspecialchars($mese['mese_label']) ?>
-                                                </option>
-                                            <?php endforeach; ?>
-                                        </select>
-                                    <?php endif; ?>
-                                </div>
+                        <div class="stats-mini">
+                            <div class="stat-mini">
+                                <span>📧</span>
+                                <span><?= $stats['email'] ?></span>
                             </div>
-                            
-                            <div class="timeline-content">
-                                <?php if (empty($comunicazioni)): ?>
-                                    <div class="empty-state">
-                                        <p>🔍 Nessuna comunicazione trovata</p>
-                                        <p style="font-size: 0.875rem; margin-top: 0.5rem;">
-                                            Registra la prima comunicazione usando il form a sinistra
-                                        </p>
-                                    </div>
-                                <?php else: ?>
-                                    <?php 
-                                    $lastDate = '';
-                                    foreach ($comunicazioni as $comm): 
-                                        $currentDate = date('d/m/Y', strtotime($comm['data_comunicazione']));
-                                        $showDate = $currentDate !== $lastDate;
-                                        $lastDate = $currentDate;
-                                    ?>
-                                        <div class="timeline-item">
-                                            <div class="timeline-icon">
-                                                <?= $tipiComunicazione[$comm['tipo']]['icon'] ?? '💬' ?>
-                                            </div>
-                                            
-                                            <?php if ($showDate): ?>
-                                                <div class="timeline-date">
-                                                    <?= $currentDate ?>
-                                                </div>
-                                            <?php endif; ?>
-                                            
-                                            <div class="timeline-card">
-                                                <div class="timeline-card-header">
-                                                    <div>
-                                                        <div class="timeline-oggetto">
-                                                            <?= htmlspecialchars($comm['oggetto']) ?>
-                                                        </div>
-                                                        <div class="timeline-operatore">
-                                                            <?= htmlspecialchars($comm['operatore_nome'] ?? 'Sistema') ?>
-                                                            • <?= date('H:i', strtotime($comm['data_comunicazione'])) ?>
-                                                        </div>
-                                                    </div>
-                                                    <?php if ($sessionInfo['is_admin'] || $comm['operatore_id'] == $sessionInfo['operatore_id']): ?>
-                                                        <form method="POST" style="display: inline;" onsubmit="return confirm('Eliminare questa comunicazione?');">
-                                                            <input type="hidden" name="action" value="delete">
-                                                            <input type="hidden" name="comunicazione_id" value="<?= $comm['id'] ?>">
-                                                            <button type="submit" class="btn-small btn-danger">
-                                                                🗑️
-                                                            </button>
-                                                        </form>
-                                                    <?php endif; ?>
-                                                </div>
-                                                
-                                                <div class="timeline-contenuto">
-                                                    <?= nl2br(htmlspecialchars($comm['contenuto'])) ?>
-                                                </div>
-                                            </div>
-                                        </div>
-                                    <?php endforeach; ?>
-                                <?php endif; ?>
+                            <div class="stat-mini">
+                                <span>📞</span>
+                                <span><?= $stats['telefono'] ?></span>
+                            </div>
+                            <div class="stat-mini">
+                                <span>🤝</span>
+                                <span><?= $stats['incontro'] ?></span>
+                            </div>
+                            <div class="stat-mini">
+                                <span>📝</span>
+                                <span><?= $stats['nota'] ?></span>
                             </div>
                         </div>
                     </div>
+                    
+                    <!-- Lista comunicazioni -->
+                    <div class="comunicazioni-list">
+                        <?php if (empty($comunicazioni)): ?>
+                            <div class="empty-state">
+                                <div class="empty-state-icon">💬</div>
+                                <p>Nessuna comunicazione registrata</p>
+                                <p style="font-size: 0.875rem; color: var(--gray-500);">
+                                    Clicca su "Aggiungi Comunicazione" per iniziare
+                                </p>
+                            </div>
+                        <?php else: ?>
+                            <?php foreach ($comunicazioni as $com): ?>
+                                <div class="comunicazione-item">
+                                    <div class="comunicazione-header">
+                                        <div class="comunicazione-tipo">
+                                            <div class="tipo-icon">
+                                                <?= $tipiComunicazione[$com['tipo']]['icon'] ?>
+                                            </div>
+                                            <div class="tipo-info">
+                                                <div class="tipo-label">
+                                                    <?= $tipiComunicazione[$com['tipo']]['label'] ?>
+                                                </div>
+                                                <div class="tipo-meta">
+                                                    <?= date('d/m/Y H:i', strtotime($com['data_comunicazione'])) ?> • 
+                                                    <?= htmlspecialchars($com['operatore_nome']) ?>
+                                                </div>
+                                            </div>
+                                        </div>
+                                        
+                                        <?php if ($sessionInfo['is_admin'] || $com['operatore_id'] == $sessionInfo['operatore_id']): ?>
+                                            <div class="comunicazione-actions">
+                                                <form method="POST" style="display: inline;" 
+                                                      onsubmit="return confirm('Eliminare questa comunicazione?');">
+                                                    <input type="hidden" name="action" value="delete">
+                                                    <input type="hidden" name="comunicazione_id" value="<?= $com['id'] ?>">
+                                                    <button type="submit" class="btn btn-danger btn-small">
+                                                        🗑️
+                                                    </button>
+                                                </form>
+                                            </div>
+                                        <?php endif; ?>
+                                    </div>
+                                    
+                                    <div class="comunicazione-oggetto">
+                                        <?= htmlspecialchars($com['oggetto']) ?>
+                                    </div>
+                                    
+                                    <div class="comunicazione-contenuto">
+                                        <?= nl2br(htmlspecialchars($com['contenuto'])) ?>
+                                    </div>
+                                </div>
+                            <?php endforeach; ?>
+                        <?php endif; ?>
+                    </div>
+                    
+                    <!-- Paginazione -->
+                    <?php if ($totalPages > 1): ?>
+                        <div class="pagination" style="margin-top: 1.5rem;">
+                            <?php if ($page > 1): ?>
+                                <a href="?action=clienti&view=comunicazioni&id=<?= $clienteId ?>&page=1<?= buildQueryString() ?>" 
+                                   class="page-link">«</a>
+                                <a href="?action=clienti&view=comunicazioni&id=<?= $clienteId ?>&page=<?= $page - 1 ?><?= buildQueryString() ?>" 
+                                   class="page-link">‹</a>
+                            <?php endif; ?>
+                            
+                            <?php
+                            $startPage = max(1, $page - 2);
+                            $endPage = min($totalPages, $page + 2);
+                            
+                            for ($i = $startPage; $i <= $endPage; $i++):
+                            ?>
+                                <a href="?action=clienti&view=comunicazioni&id=<?= $clienteId ?>&page=<?= $i ?><?= buildQueryString() ?>" 
+                                   class="page-link <?= $i === $page ? 'active' : '' ?>">
+                                    <?= $i ?>
+                                </a>
+                            <?php endfor; ?>
+                            
+                            <?php if ($page < $totalPages): ?>
+                                <a href="?action=clienti&view=comunicazioni&id=<?= $clienteId ?>&page=<?= $page + 1 ?><?= buildQueryString() ?>" 
+                                   class="page-link">›</a>
+                                <a href="?action=clienti&view=comunicazioni&id=<?= $clienteId ?>&page=<?= $totalPages ?><?= buildQueryString() ?>" 
+                                   class="page-link">»</a>
+                            <?php endif; ?>
+                        </div>
+                    <?php endif; ?>
                 </div>
             </main>
         </div>
     </div>
-
-    <!-- Script per selezione tipo comunicazione -->
-    <script>
-        // Gestione selezione tipo comunicazione
-        document.querySelectorAll('.tipo-option input[type="radio"]').forEach(radio => {
-            radio.addEventListener('change', function() {
-                // Rimuovi classe selected da tutti
-                document.querySelectorAll('.tipo-option').forEach(opt => {
-                    opt.classList.remove('selected');
-                });
-                
-                // Aggiungi classe selected al genitore
-                if (this.checked) {
-                    this.closest('.tipo-option').classList.add('selected');
-                }
-            });
-        });
-        
-        // Simula click sul primo radio al caricamento
-        const checkedRadio = document.querySelector('.tipo-option input[type="radio"]:checked');
-        if (checkedRadio) {
-            checkedRadio.closest('.tipo-option').classList.add('selected');
-        }
-    </script>
     
-    <!-- Script microinterazioni -->
-    <script src="/crm/assets/js/microinteractions.js"></script>
+    <script>
+    function toggleForm() {
+        const form = document.getElementById('addForm');
+        const button = document.getElementById('toggleButton');
+        
+        if (form.style.display === 'none') {
+            form.style.display = 'block';
+            button.style.display = 'none';
+            // Focus sul primo campo
+            form.querySelector('select[name="tipo"]').focus();
+        } else {
+            form.style.display = 'none';
+            button.style.display = 'flex';
+        }
+    }
+    
+    // Mostra form se ci sono errori
+    <?php if (!empty($errors) && $_POST['action'] === 'add'): ?>
+    toggleForm();
+    <?php endif; ?>
+    </script>
 </body>
 </html>
+
+<?php
+function buildQueryString() {
+    $params = [];
+    if (!empty($_GET['tipo']) && $_GET['tipo'] !== 'all') $params[] = 'tipo=' . $_GET['tipo'];
+    if (!empty($_GET['periodo']) && $_GET['periodo'] !== '30') $params[] = 'periodo=' . $_GET['periodo'];
+    
+    return $params ? '&' . implode('&', $params) : '';
+}
+?>

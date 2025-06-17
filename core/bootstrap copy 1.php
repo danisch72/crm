@@ -66,42 +66,6 @@ if (!$isPublicPage && !$auth->isAuthenticated()) {
 // CARICA COMPONENTI OPZIONALI
 // ================================================================
 
-
-// In getCurrentUser() o dopo autenticazione riuscita:
-function initializeUserSession($userData) {
-    // ... codice esistente ...
-    
-    // Inizializza session_start solo se non esiste
-    if (!isset($_SESSION['session_start'])) {
-        $_SESSION['session_start'] = time();
-        $_SESSION['session_date'] = date('Y-m-d');
-    }
-    
-    // Reset timer solo se è un nuovo giorno
-    $currentDate = date('Y-m-d');
-    if (isset($_SESSION['session_date']) && $_SESSION['session_date'] !== $currentDate) {
-        $_SESSION['session_start'] = time();
-        $_SESSION['session_date'] = $currentDate;
-    }
-}
-
-// Alternativa: modifica diretta in header.php
-// In components/header.php, sostituire:
-// $sessionStart = $_SESSION['session_start'] ?? time();
-// Con:
-if (!isset($_SESSION['session_start'])) {
-    $_SESSION['session_start'] = time();
-    $_SESSION['session_date'] = date('Y-m-d');
-}
-
-// Reset solo se nuovo giorno
-$currentDate = date('Y-m-d');
-if (isset($_SESSION['session_date']) && $_SESSION['session_date'] !== $currentDate) {
-    $_SESSION['session_start'] = time();
-    $_SESSION['session_date'] = $currentDate;
-}
-
-$sessionStart = $_SESSION['session_start'];
 /**
  * Carica classe Database se disponibile
  * Nota: Non obbligatorio, caricato solo se necessario
