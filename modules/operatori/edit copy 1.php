@@ -147,7 +147,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 // Log modifica
                 $db->insert('auth_log', [
                     'user_id' => $sessionInfo['operatore_id'],
-                    'action' => 'edit_operator',
+                    'action' => 'update_operator',
                     'ip_address' => $_SERVER['REMOTE_ADDR'] ?? '',
                     'user_agent' => $_SERVER['HTTP_USER_AGENT'] ?? '',
                     'additional_data' => json_encode([

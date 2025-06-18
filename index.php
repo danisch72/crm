@@ -31,6 +31,7 @@ $availableModules = [
     'dashboard' => 'modules/dashboard',       // Modulo dashboard
     'operatori' => 'modules/operatori',       // Modulo operatori
     'clienti' => 'modules/clienti',           // Modulo clienti
+    'pratiche' => 'modules/pratiche',         // ➕ NUOVO: Modulo pratiche
     // Aggiungere nuovi moduli qui
 ];
 
