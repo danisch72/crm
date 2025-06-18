@@ -10,6 +10,11 @@
  * 3. Dettagli e Scadenze
  * 4. Revisione Task
  * 5. Conferma e Creazione
+ * 
+ * VERSIONE CORRETTA CON FIX:
+ * - Selezione clienti funzionante (cliente-card)
+ * - Salvataggio con campi corretti
+ * - Layout largo (1280px)
  */
 
 // Verifica router
@@ -22,11 +27,16 @@ if (!defined('PRATICHE_ROUTER_LOADED')) {
 // $sessionInfo, $db, $currentUser
 
 // Gestione step wizard
-$currentStep = isset($_POST['step']) ? (int)$_POST['step'] : 1;
+$currentStep = isset($_POST['step']) ? (int)$_POST['step'] : ($_SESSION['pratica_wizard_step'] ?? 1);
 $wizardData = $_SESSION['pratica_wizard'] ?? [];
 
 // Se form submitted
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
+    
+    // Debug: log dei dati POST
+    error_log("POST data: " . print_r($_POST, true));
+    error_log("Current step: " . $currentStep);
+    error_log("Action: " . ($_POST['action'] ?? 'none'));
     
     // Salva dati step corrente
     switch ($currentStep) {
@@ -60,18 +70,43 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     if (isset($_POST['action'])) {
         if ($_POST['action'] === 'next') {
             $currentStep++;
+            $_SESSION['pratica_wizard_step'] = $currentStep;
         } elseif ($_POST['action'] === 'prev') {
             $currentStep--;
+            $_SESSION['pratica_wizard_step'] = $currentStep;
         } elseif ($_POST['action'] === 'save' && $currentStep === 5) {
-            // Crea pratica
-            $praticaId = creaPratica($wizardData, $db, $currentUser);
-            if ($praticaId) {
-                unset($_SESSION['pratica_wizard']);
-                $_SESSION['success_message'] = '✅ Pratica creata con successo!';
-                header("Location: /crm/?action=pratiche&view=view&id=$praticaId");
-                exit;
+            // Debug prima di creare
+            error_log("Attempting to create pratica with data: " . print_r($wizardData, true));
+            
+            // Verifica dati obbligatori
+            if (empty($wizardData['cliente_id'])) {
+                $error_message = 'Errore: Cliente non selezionato';
+                error_log("Missing cliente_id");
+            } elseif (empty($wizardData['tipo_pratica'])) {
+                $error_message = 'Errore: Tipo pratica non selezionato';
+                error_log("Missing tipo_pratica");
+            } elseif (empty($wizardData['titolo'])) {
+                $error_message = 'Errore: Titolo pratica mancante';
+                error_log("Missing titolo");
+            } elseif (empty($wizardData['data_scadenza'])) {
+                $error_message = 'Errore: Data scadenza mancante';
+                error_log("Missing data_scadenza");
             } else {
-                $error_message = 'Errore durante la creazione della pratica';
+                // Crea pratica
+                $praticaId = creaPratica($wizardData, $db, $currentUser);
+                if ($praticaId) {
+                    unset($_SESSION['pratica_wizard']);
+                    unset($_SESSION['pratica_wizard_step']);
+                    $_SESSION['success_message'] = '✅ Pratica creata con successo! ID: ' . $praticaId;
+                    
+                    // Redirect alla lista pratiche invece che alla view
+                    // (la view potrebbe non esistere ancora)
+                    header("Location: /crm/?action=pratiche");
+                    exit;
+                } else {
+                    $error_message = 'Errore durante la creazione della pratica. Controlla i log per dettagli.';
+                    error_log("Failed to create pratica");
+                }
             }
         }
     }
@@ -82,6 +117,7 @@ $clienti = [];
 $templates = [];
 $templateTasks = [];
 
+// Carica sempre i clienti per lo step 5 (riepilogo)
 if ($currentStep === 1 || $currentStep >= 3) {
     // Carica clienti
     if ($currentUser['is_admin']) {
@@ -122,74 +158,83 @@ if ($currentStep >= 4 && !empty($wizardData['template_id']) && $wizardData['usa_
     $templateTasks = getDefaultTasksForType($wizardData['tipo_pratica']);
 }
 
-// Funzioni helper
+// Funzioni helper - VERSIONE CORRETTA PER DATABASE SCHEMA
 function creaPratica($data, $db, $user) {
     try {
         $db->beginTransaction();
         
-        // Genera numero pratica
-        $anno = date('Y');
-        $lastNumber = $db->selectOne("
-            SELECT MAX(CAST(SUBSTRING_INDEX(numero_pratica, '-', -1) AS UNSIGNED)) as last_num
-            FROM pratiche
-            WHERE numero_pratica LIKE ?
-        ", ["PRT-$anno-%"]);
+        // Ottieni o crea settore di default
+        $settoreDefault = $db->selectOne("SELECT id FROM settori WHERE nome = 'Generale' AND is_attivo = 1");
+        if (!$settoreDefault) {
+            // Crea settore di default se non esiste
+            $settoreId = $db->insert('settori', [
+                'nome' => 'Generale',
+                'descrizione' => 'Settore generale per pratiche non categorizzate',
+                'colore_hex' => '#007849',
+                'is_attivo' => 1
+            ]);
+        } else {
+            $settoreId = $settoreDefault['id'];
+        }
         
-        $nextNumber = ($lastNumber['last_num'] ?? 0) + 1;
-        $numeroPratica = sprintf("PRT-%s-%06d", $anno, $nextNumber);
-        
-        // Inserisci pratica
+        // Inserisci pratica con SOLO I CAMPI CHE ESISTONO NEL DATABASE
         $praticaId = $db->insert('pratiche', [
-            'numero_pratica' => $numeroPratica,
-            'cliente_id' => $data['cliente_id'],
-            'tipo_pratica' => $data['tipo_pratica'],
+            'settore_id' => $settoreId, // CAMPO OBBLIGATORIO
+            'cliente_id' => $data['cliente_id'], // CAMPO OBBLIGATORIO
+            'operatore_assegnato_id' => $user['id'], // Assegna all'utente corrente
             'titolo' => $data['titolo'],
             'descrizione' => $data['descrizione'],
+            'stato' => 'in_corso', // CORRETTO: valori validi sono 'da_iniziare', 'in_corso', 'completata', 'sospesa'
             'priorita' => $data['priorita'],
-            'data_apertura' => date('Y-m-d'),
             'data_scadenza' => $data['data_scadenza'],
-            'stato' => 'attiva',
-            'operatore_responsabile_id' => $user['id'],
-            'valore_pratica' => $data['valore_pratica'],
-            'ore_preventivate' => $data['ore_preventivate'],
-            'template_id' => $data['template_id'] ?? null,
-            'created_by' => $user['id']
+            'ore_stimate' => floatval($data['ore_preventivate']), // Nome campo nel DB schema
+            'ore_lavorate' => 0.00 // Inizializza a 0
         ]);
         
-        // Crea task
+        // Log per debug
+        error_log("Pratica creata con ID: " . $praticaId);
+        
+        // Crea task con campi e stati corretti
         if (!empty($data['tasks'])) {
             foreach ($data['tasks'] as $index => $task) {
                 if (!empty($task['titolo'])) {
-                    $db->insert('task', [
+                    // Calcola data scadenza task (7 giorni dopo per default)
+                    $dataScadenzaTask = date('Y-m-d', strtotime('+7 days'));
+                    
+                    $taskId = $db->insert('task', [
                         'pratica_id' => $praticaId,
+                        'cliente_id' => $data['cliente_id'], // CAMPO OBBLIGATORIO
                         'titolo' => $task['titolo'],
                         'descrizione' => $task['descrizione'] ?? '',
-                        'ordine' => $index + 1,
-                        'ore_stimate' => $task['ore_stimate'] ?? 0,
-                        'is_obbligatorio' => $task['is_obbligatorio'] ?? 1,
-                        'stato' => 'da_fare',
-                        'operatore_assegnato_id' => $user['id'],
-                        'operatore_creato_id' => $user['id']
+                        'data_scadenza' => $dataScadenzaTask, // CAMPO OBBLIGATORIO
+                        'stato' => 'da_iniziare', // CORRETTO: valori validi sono 'da_iniziare', 'in_corso', 'completato', 'sospeso'
+                        'priorita' => 'media',
+                        'ore_stimate' => floatval($task['ore_stimate'] ?? 0),
+                        'ore_lavorate' => 0.00,
+                        'operatore_assegnato_id' => $user['id']
                     ]);
+                    
+                    error_log("Task creato con ID: " . $taskId);
                 }
             }
         }
         
-        // Aggiorna contatore template
-        if (!empty($data['template_id'])) {
-            $db->query("
-                UPDATE pratiche_template 
-                SET utilizzi_count = utilizzi_count + 1 
-                WHERE id = ?
-            ", [$data['template_id']]);
-        }
-        
         $db->commit();
+        
+        // Salva informazioni aggiuntive in sessione per uso futuro
+        $_SESSION['pratica_info'] = [
+            'id' => $praticaId,
+            'tipo_pratica' => $data['tipo_pratica'],
+            'valore_pratica' => $data['valore_pratica'],
+            'template_id' => $data['template_id'] ?? null
+        ];
+        
         return $praticaId;
         
     } catch (Exception $e) {
         $db->rollback();
-        error_log("Errore creazione pratica: " . $e->getMessage());
+        error_log("Errore creazione pratica DETTAGLIATO: " . $e->getMessage());
+        error_log("Stack trace: " . $e->getTraceAsString());
         return false;
     }
 }
@@ -225,9 +270,9 @@ function getDefaultTasksForType($tipo) {
     <link rel="stylesheet" href="/crm/assets/css/datev-optimal.css">
     
     <style>
-        /* Wizard styles */
+        /* Wizard styles - LAYOUT LARGO */
         .wizard-container {
-            max-width: 900px;
+            max-width: 1280px; /* FIX: era 900px */
             margin: 2rem auto;
             padding: 0 1rem;
         }
@@ -379,61 +424,75 @@ function getDefaultTasksForType($tipo) {
             margin-top: 0.25rem;
         }
         
+        .form-check {
+            display: flex;
+            align-items: center;
+        }
+        
+        .form-check input[type="checkbox"] {
+            width: auto;
+            margin-right: 0.5rem;
+        }
+        
         .form-row {
             display: grid;
-            grid-template-columns: 1fr 1fr;
+            grid-template-columns: repeat(2, 1fr);
             gap: 1rem;
         }
         
-        /* Cliente card */
+        /* Cliente cards - FIX CLASSE */
+        .clienti-list {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+            gap: 1rem;
+            margin-top: 1rem;
+        }
+        
         .cliente-card {
-            border: 2px solid #e5e7eb;
-            border-radius: 6px;
+            display: block;
             padding: 1rem;
-            margin-bottom: 0.75rem;
+            border: 2px solid #e5e7eb;
+            border-radius: 8px;
             cursor: pointer;
             transition: all 0.2s;
+            background: white;
         }
         
         .cliente-card:hover {
             border-color: var(--primary-green);
-            background: #f0fdf4;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
         }
         
         .cliente-card.selected {
             border-color: var(--primary-green);
             background: #f0fdf4;
-            border-width: 2px;
         }
         
         .cliente-nome {
             font-weight: 600;
-            font-size: 0.875rem;
             color: #1f2937;
+            margin-bottom: 0.25rem;
         }
         
         .cliente-info {
             font-size: 0.75rem;
             color: #6b7280;
-            margin-top: 0.25rem;
         }
         
-        /* Template card */
+        /* Template options */
         .template-option {
-            display: flex;
-            align-items: flex-start;
-            gap: 0.75rem;
+            display: block;
             padding: 1rem;
             border: 2px solid #e5e7eb;
-            border-radius: 6px;
-            margin-bottom: 0.75rem;
+            border-radius: 8px;
             cursor: pointer;
             transition: all 0.2s;
+            background: white;
+            margin-bottom: 0.75rem;
         }
         
         .template-option:hover {
             border-color: var(--primary-green);
-            background: #f9fafb;
         }
         
         .template-option.selected {
@@ -441,33 +500,19 @@ function getDefaultTasksForType($tipo) {
             background: #f0fdf4;
         }
         
-        .template-radio {
-            margin-top: 0.125rem;
-        }
-        
-        .template-content {
-            flex: 1;
-        }
-        
         .template-name {
             font-weight: 600;
-            font-size: 0.875rem;
             color: #1f2937;
-            margin-bottom: 0.25rem;
         }
         
-        .template-description {
+        .template-info {
             font-size: 0.75rem;
             color: #6b7280;
-            line-height: 1.4;
+            margin-top: 0.25rem;
         }
         
-        .template-meta {
-            display: flex;
-            gap: 1rem;
-            margin-top: 0.5rem;
-            font-size: 0.6875rem;
-            color: #6b7280;
+        .template-radio {
+            display: none;
         }
         
         /* Task list */
@@ -556,6 +601,7 @@ function getDefaultTasksForType($tipo) {
             display: inline-flex;
             align-items: center;
             gap: 0.5rem;
+            text-decoration: none;
         }
         
         .btn-secondary {
@@ -701,49 +747,64 @@ function getDefaultTasksForType($tipo) {
                     </div>
                     
                     <!-- Content -->
-                    <form method="POST" class="wizard-form">
-                        <input type="hidden" name="step" value="<?= $currentStep ?>">
+                    <div class="wizard-content">
+                        <?php if (isset($error_message) && !empty($error_message)): ?>
+                            <div class="alert alert-error" style="background: #fee; border: 1px solid #fcc; color: #c00; padding: 1rem; border-radius: 6px; margin-bottom: 1rem;">
+                                ⚠️ <?= htmlspecialchars($error_message) ?>
+                            </div>
+                        <?php endif; ?>
                         
-                        <div class="wizard-content">
+                        <?php if (isset($_SESSION['debug']) && $_SESSION['debug']): ?>
+                            <div style="background: #f0f0f0; border: 1px solid #ccc; padding: 1rem; margin-bottom: 1rem; font-family: monospace; font-size: 0.8rem;">
+                                <strong>DEBUG:</strong><br>
+                                Step: <?= $currentStep ?><br>
+                                Action: <?= $_POST['action'] ?? 'none' ?><br>
+                                Wizard Data: <pre><?= print_r($wizardData, true) ?></pre>
+                            </div>
+                        <?php endif; ?>
+                        
+                        <form method="POST">
+                            <input type="hidden" name="step" value="<?= $currentStep ?>">
+                            
                             <?php if ($currentStep === 1): ?>
-                                <!-- Step 1: Cliente -->
-                                <h2 class="step-title">Seleziona il Cliente</h2>
+                                <!-- Step 1: Selezione Cliente - CORRETTO -->
+                                <h2 class="step-title">Seleziona Cliente</h2>
                                 <p class="step-description">
-                                    Scegli il cliente per cui creare la nuova pratica
+                                    Scegli il cliente per cui creare la pratica
                                 </p>
                                 
-                                <div class="search-box">
-                                    <span class="search-icon">🔍</span>
-                                    <input type="text" 
-                                           class="form-control search-input" 
-                                           placeholder="Cerca cliente per nome o codice fiscale..."
-                                           onkeyup="filterClienti(this.value)">
-                                </div>
-                                
-                                <div id="clienti-list">
-                                    <?php foreach ($clienti as $cliente): ?>
-                                        <label class="cliente-card <?= ($wizardData['cliente_id'] ?? '') == $cliente['id'] ? 'selected' : '' ?>">
-                                            <input type="radio" 
-                                                   name="cliente_id" 
-                                                   value="<?= $cliente['id'] ?>"
-                                                   <?= ($wizardData['cliente_id'] ?? '') == $cliente['id'] ? 'checked' : '' ?>
-                                                   style="display: none;">
-                                            <div class="cliente-nome">
-                                                <?= htmlspecialchars($cliente['ragione_sociale']) ?>
-                                            </div>
-                                            <div class="cliente-info">
-                                                <?php if ($cliente['codice_fiscale']): ?>
-                                                    CF: <?= htmlspecialchars($cliente['codice_fiscale']) ?>
-                                                <?php endif; ?>
-                                                <?php if ($cliente['partita_iva']): ?>
-                                                    • P.IVA: <?= htmlspecialchars($cliente['partita_iva']) ?>
-                                                <?php endif; ?>
-                                            </div>
-                                        </label>
-                                    <?php endforeach; ?>
-                                </div>
-                                
-                                <?php if (empty($clienti)): ?>
+                                <?php if (!empty($clienti)): ?>
+                                    <div class="search-box">
+                                        <span class="search-icon">🔍</span>
+                                        <input type="text" 
+                                               class="form-control search-input" 
+                                               placeholder="Cerca cliente..."
+                                               onkeyup="filterClienti(this.value)">
+                                    </div>
+                                    
+                                    <div class="clienti-list">
+                                        <?php foreach ($clienti as $cliente): ?>
+                                            <label class="cliente-card <?= ($wizardData['cliente_id'] ?? '') == $cliente['id'] ? 'selected' : '' ?>">
+                                                <input type="radio" 
+                                                       name="cliente_id" 
+                                                       value="<?= $cliente['id'] ?>"
+                                                       <?= ($wizardData['cliente_id'] ?? '') == $cliente['id'] ? 'checked' : '' ?>
+                                                       style="display: none;">
+                                                <div class="cliente-nome">
+                                                    <?= htmlspecialchars($cliente['ragione_sociale']) ?>
+                                                </div>
+                                                <div class="cliente-info">
+                                                    <?php if ($cliente['codice_fiscale']): ?>
+                                                        CF: <?= htmlspecialchars($cliente['codice_fiscale']) ?>
+                                                    <?php endif; ?>
+                                                    <?php if ($cliente['partita_iva']): ?>
+                                                        • P.IVA: <?= htmlspecialchars($cliente['partita_iva']) ?>
+                                                    <?php endif; ?>
+                                                </div>
+                                            </label>
+                                        <?php endforeach; ?>
+                                    </div>
+                                <?php else: ?>
                                     <div class="empty-state">
                                         <div class="empty-state-icon">🏢</div>
                                         <p>Nessun cliente disponibile</p>
@@ -795,21 +856,14 @@ function getDefaultTasksForType($tipo) {
                                                        value="<?= $template['id'] ?>"
                                                        class="template-radio"
                                                        <?= ($wizardData['template_id'] ?? '') == $template['id'] ? 'checked' : '' ?>>
-                                                <div class="template-content">
-                                                    <div class="template-name">
-                                                        <?= htmlspecialchars($template['nome']) ?>
-                                                    </div>
-                                                    <?php if ($template['descrizione']): ?>
-                                                        <div class="template-description">
-                                                            <?= htmlspecialchars($template['descrizione']) ?>
-                                                        </div>
-                                                    <?php endif; ?>
-                                                    <div class="template-meta">
-                                                        <span>⏱️ <?= $template['ore_totali_stimate'] ?>h stimate</span>
-                                                        <span>💰 €<?= number_format($template['tariffa_consigliata'], 2, ',', '.') ?></span>
-                                                        <span>📅 <?= $template['giorni_completamento'] ?>gg</span>
-                                                        <span>✨ Usato <?= $template['utilizzi_count'] ?> volte</span>
-                                                    </div>
+                                                <div class="template-name">
+                                                    <?= htmlspecialchars($template['nome']) ?>
+                                                </div>
+                                                <div class="template-info">
+                                                    <?= htmlspecialchars($template['descrizione'] ?? '') ?>
+                                                    <br>
+                                                    <strong>Ore stimate:</strong> <?= $template['ore_totali_stimate'] ?>h
+                                                    • <strong>Giorni:</strong> <?= $template['giorni_completamento'] ?>
                                                 </div>
                                             </label>
                                         <?php endforeach; ?>
@@ -817,35 +871,18 @@ function getDefaultTasksForType($tipo) {
                                 <?php endif; ?>
                                 
                             <?php elseif ($currentStep === 3): ?>
-                                <!-- Step 3: Dettagli -->
-                                <h2 class="step-title">Dettagli della Pratica</h2>
+                                <!-- Step 3: Dettagli e Scadenze -->
+                                <h2 class="step-title">Dettagli Pratica</h2>
                                 <p class="step-description">
-                                    Inserisci le informazioni specifiche per questa pratica
+                                    Inserisci i dettagli della pratica
                                 </p>
                                 
                                 <?php
-                                // Calcola defaults da template se selezionato
-                                $selectedTemplate = null;
-                                if (!empty($wizardData['template_id'])) {
-                                    foreach ($templates as $t) {
-                                        if ($t['id'] == $wizardData['template_id']) {
-                                            $selectedTemplate = $t;
-                                            break;
-                                        }
-                                    }
-                                }
-                                
-                                $defaultTitolo = '';
+                                // Valori di default basati su tipo pratica
+                                $tipoConfig = getPraticaType($wizardData['tipo_pratica'] ?? '');
+                                $defaultTitolo = $tipoConfig['label'] . ' - ' . date('Y');
+                                $defaultOre = $tipoConfig['ore_default'] ?? 10;
                                 $defaultScadenza = date('Y-m-d', strtotime('+30 days'));
-                                $defaultOre = 0;
-                                $defaultValore = 0;
-                                
-                                if ($selectedTemplate) {
-                                    $defaultTitolo = $selectedTemplate['nome'];
-                                    $defaultScadenza = date('Y-m-d', strtotime('+' . $selectedTemplate['giorni_completamento'] . ' days'));
-                                    $defaultOre = $selectedTemplate['ore_totali_stimate'];
-                                    $defaultValore = $selectedTemplate['tariffa_consigliata'];
-                                }
                                 ?>
                                 
                                 <div class="form-group">
@@ -898,9 +935,6 @@ function getDefaultTasksForType($tipo) {
                                                value="<?= $wizardData['ore_preventivate'] ?? $defaultOre ?>"
                                                step="0.5"
                                                min="0">
-                                        <div class="form-help">
-                                            Stima delle ore necessarie
-                                        </div>
                                     </div>
                                     
                                     <div class="form-group">
@@ -908,44 +942,28 @@ function getDefaultTasksForType($tipo) {
                                         <input type="number" 
                                                name="valore_pratica" 
                                                class="form-control" 
-                                               value="<?= $wizardData['valore_pratica'] ?? $defaultValore ?>"
+                                               value="<?= $wizardData['valore_pratica'] ?? 0 ?>"
                                                step="0.01"
                                                min="0">
-                                        <div class="form-help">
-                                            Valore economico della pratica
-                                        </div>
                                     </div>
                                 </div>
                                 
                             <?php elseif ($currentStep === 4): ?>
                                 <!-- Step 4: Task -->
-                                <h2 class="step-title">Definisci i Task</h2>
+                                <h2 class="step-title">Task della Pratica</h2>
                                 <p class="step-description">
-                                    Configura i task necessari per completare la pratica
+                                    Definisci i task da completare per questa pratica
                                 </p>
                                 
                                 <div class="task-list" id="task-list">
                                     <?php 
-                                    $tasks = $wizardData['tasks'] ?? [];
-                                    if (empty($tasks) && !empty($templateTasks)) {
-                                        // Usa task del template
-                                        foreach ($templateTasks as $index => $task) {
-                                            $tasks[] = [
-                                                'titolo' => $task['titolo'],
-                                                'descrizione' => $task['descrizione'] ?? '',
-                                                'ore_stimate' => $task['ore_stimate'] ?? 0,
-                                                'is_obbligatorio' => $task['is_obbligatorio'] ?? 1
-                                            ];
-                                        }
-                                    }
-                                    
-                                    // Assicura almeno un task
+                                    $tasks = $wizardData['tasks'] ?? $templateTasks;
                                     if (empty($tasks)) {
-                                        $tasks[] = ['titolo' => '', 'ore_stimate' => 1];
+                                        $tasks = [['titolo' => '', 'ore_stimate' => 1]];
                                     }
-                                    ?>
                                     
-                                    <?php foreach ($tasks as $index => $task): ?>
+                                    foreach ($tasks as $index => $task): 
+                                    ?>
                                         <div class="task-item" data-index="<?= $index ?>">
                                             <div class="task-header">
                                                 <span class="task-number"><?= $index + 1 ?></span>
@@ -1000,7 +1018,7 @@ function getDefaultTasksForType($tipo) {
                                     }
                                 }
                                 
-                                $tipoConfig = getPraticaType($wizardData['tipo_pratica']);
+                                $tipoConfig = getPraticaType($wizardData['tipo_pratica'] ?? '');
                                 ?>
                                 
                                 <div class="summary-section">
@@ -1027,125 +1045,120 @@ function getDefaultTasksForType($tipo) {
                                         <div class="summary-item">
                                             <span class="summary-label">Priorità:</span>
                                             <span class="summary-value">
-                                                <?= PRATICHE_PRIORITA[$wizardData['priorita']]['label'] ?? '' ?>
+                                                <?= PRATICHE_PRIORITA[$wizardData['priorita'] ?? 'media']['label'] ?? '' ?>
                                             </span>
                                         </div>
                                         <div class="summary-item">
                                             <span class="summary-label">Scadenza:</span>
                                             <span class="summary-value">
-                                                <?= date('d/m/Y', strtotime($wizardData['data_scadenza'])) ?>
+                                                <?= date('d/m/Y', strtotime($wizardData['data_scadenza'] ?? 'now')) ?>
                                             </span>
                                         </div>
                                     </div>
                                 </div>
                                 
-                                <?php if (!empty($wizardData['descrizione'])): ?>
-                                    <div class="summary-section">
-                                        <h3 class="summary-title">📝 Descrizione</h3>
-                                        <div class="summary-content">
-                                            <?= nl2br(htmlspecialchars($wizardData['descrizione'])) ?>
-                                        </div>
-                                    </div>
-                                <?php endif; ?>
-                                
                                 <div class="summary-section">
-                                    <h3 class="summary-title">💰 Dati Economici</h3>
+                                    <h3 class="summary-title">⚙️ Dettagli Economici</h3>
                                     <div class="summary-content">
                                         <div class="summary-item">
                                             <span class="summary-label">Ore preventivate:</span>
                                             <span class="summary-value">
-                                                <?= number_format($wizardData['ore_preventivate'] ?? 0, 1, ',', '.') ?> ore
+                                                <?= $wizardData['ore_preventivate'] ?? 0 ?>h
                                             </span>
                                         </div>
                                         <div class="summary-item">
                                             <span class="summary-label">Valore pratica:</span>
                                             <span class="summary-value">
-                                                €<?= number_format($wizardData['valore_pratica'] ?? 0, 2, ',', '.') ?>
+                                                € <?= number_format($wizardData['valore_pratica'] ?? 0, 2, ',', '.') ?>
                                             </span>
                                         </div>
                                     </div>
                                 </div>
                                 
-                                <div class="summary-section">
-                                    <h3 class="summary-title">📋 Task previsti (<?= count($wizardData['tasks'] ?? []) ?>)</h3>
-                                    <div class="summary-content">
-                                        <?php 
-                                        $totaleOreTask = 0;
-                                        foreach (($wizardData['tasks'] ?? []) as $index => $task): 
-                                            if (!empty($task['titolo'])):
-                                                $totaleOreTask += floatval($task['ore_stimate'] ?? 0);
-                                        ?>
-                                            <div class="summary-item">
-                                                <span class="summary-label">
-                                                    <?= $index + 1 ?>. <?= htmlspecialchars($task['titolo']) ?>
-                                                </span>
-                                                <span class="summary-value">
-                                                    <?= number_format($task['ore_stimate'] ?? 0, 1, ',', '.') ?>h
-                                                </span>
+                                <?php if (!empty($wizardData['tasks'])): ?>
+                                    <div class="summary-section">
+                                        <h3 class="summary-title">📝 Task Previsti</h3>
+                                        <div class="summary-content">
+                                            <?php 
+                                            $totaleOreTask = 0;
+                                            foreach ($wizardData['tasks'] as $task): 
+                                                if (!empty($task['titolo'])):
+                                                    $totaleOreTask += $task['ore_stimate'] ?? 0;
+                                            ?>
+                                                <div class="summary-item">
+                                                    <span class="summary-label"><?= htmlspecialchars($task['titolo']) ?>:</span>
+                                                    <span class="summary-value"><?= $task['ore_stimate'] ?? 0 ?>h</span>
+                                                </div>
+                                            <?php 
+                                                endif;
+                                            endforeach; 
+                                            ?>
+                                            <div class="summary-item" style="border-top: 1px solid #e5e7eb; padding-top: 0.5rem; margin-top: 0.5rem;">
+                                                <span class="summary-label"><strong>Totale ore task:</strong></span>
+                                                <span class="summary-value"><strong><?= $totaleOreTask ?>h</strong></span>
                                             </div>
-                                        <?php 
-                                            endif;
-                                        endforeach; 
-                                        ?>
-                                        <div class="summary-item" style="border-top: 1px solid #e5e7eb; margin-top: 0.5rem; padding-top: 0.5rem;">
-                                            <span class="summary-label"><strong>Totale ore task:</strong></span>
-                                            <span class="summary-value"><strong><?= number_format($totaleOreTask, 1, ',', '.') ?>h</strong></span>
                                         </div>
                                     </div>
-                                </div>
+                                <?php endif; ?>
                             <?php endif; ?>
-                        </div>
-                        
-                        <!-- Navigation -->
-                        <div class="wizard-navigation">
-                            <div>
-                                <?php if ($currentStep > 1): ?>
-                                    <button type="submit" name="action" value="prev" class="btn btn-secondary">
-                                        ← Indietro
-                                    </button>
-                                <?php else: ?>
-                                    <a href="/crm/?action=pratiche" class="btn btn-secondary">
-                                        Annulla
-                                    </a>
-                                <?php endif; ?>
-                            </div>
                             
-                            <div>
-                                <?php if ($currentStep < 5): ?>
-                                    <button type="submit" 
-                                            name="action" 
-                                            value="next" 
-                                            class="btn btn-primary"
-                                            <?= $currentStep === 1 && empty($wizardData['cliente_id']) ? 'disabled' : '' ?>>
-                                        Avanti →
-                                    </button>
-                                <?php else: ?>
-                                    <button type="submit" 
-                                            name="action" 
-                                            value="save" 
-                                            class="btn btn-primary"
-                                            onclick="return confirm('Confermi la creazione della pratica?')">
-                                        ✅ Crea Pratica
-                                    </button>
-                                <?php endif; ?>
+                            <!-- Navigation -->
+                            <div class="wizard-navigation">
+                                <div>
+                                    <?php if ($currentStep > 1): ?>
+                                        <button type="submit" name="action" value="prev" class="btn btn-secondary">
+                                            ← Indietro
+                                        </button>
+                                    <?php else: ?>
+                                        <a href="/crm/?action=pratiche" class="btn btn-secondary">
+                                            Annulla
+                                        </a>
+                                    <?php endif; ?>
+                                </div>
+                                
+                                <div>
+                                    <?php if ($currentStep < 5): ?>
+                                        <button type="submit" 
+                                                name="action" 
+                                                value="next" 
+                                                class="btn btn-primary"
+                                                <?= $currentStep === 1 && empty($wizardData['cliente_id']) ? 'disabled' : '' ?>>
+                                            Avanti →
+                                        </button>
+                                    <?php else: ?>
+                                        <button type="submit" 
+                                                name="action" 
+                                                value="save" 
+                                                class="btn btn-primary"
+                                                onclick="return confirm('Confermi la creazione della pratica?')">
+                                            ✅ Crea Pratica
+                                        </button>
+                                    <?php endif; ?>
+                                </div>
                             </div>
-                        </div>
-                    </form>
+                        </form>
+                    </div>
                 </div>
             </main>
         </div>
     </div>
     
     <script>
-        // Gestione selezione cliente
+        // Gestione selezione cliente - JAVASCRIPT CORRETTO
         document.querySelectorAll('.cliente-card').forEach(card => {
             card.addEventListener('click', function() {
+                // Rimuovi selezione precedente
                 document.querySelectorAll('.cliente-card').forEach(c => c.classList.remove('selected'));
+                
+                // Aggiungi selezione corrente
                 this.classList.add('selected');
                 this.querySelector('input[type="radio"]').checked = true;
                 
                 // Abilita bottone next
-                document.querySelector('button[value="next"]').disabled = false;
+                const nextBtn = document.querySelector('button[value="next"]');
+                if (nextBtn) {
+                    nextBtn.disabled = false;
+                }
             });
         });
         
@@ -1237,10 +1250,8 @@ function getDefaultTasksForType($tipo) {
             });
         }
         
-        // Carica template per tipo (placeholder per AJAX futuro)
+        // Carica template per tipo
         function loadTemplates(tipo) {
-            // In futuro qui ci sarà una chiamata AJAX per caricare i template
-            // Per ora ricarica la pagina mantenendo la selezione
             if (tipo) {
                 document.querySelector('button[value="next"]').click();
             }
