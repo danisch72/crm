@@ -28,6 +28,11 @@ if (!defined('CRM_ROOT')) {
     define('CRM_ROOT', dirname(dirname(__FILE__)));
 }
 
+// Definisci CRM_PATH per retrocompatibilità con moduli esistenti
+if (!defined('CRM_PATH')) {
+    define('CRM_PATH', CRM_ROOT);
+}
+
 // ================================================================
 // CARICA SISTEMA AUTENTICAZIONE
 // ================================================================
