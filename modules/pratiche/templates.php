@@ -95,710 +95,497 @@ if (isset($_GET['edit'])) {
 require_once $_SERVER['DOCUMENT_ROOT'] . '/crm/components/header.php';
 ?>
 
-<!DOCTYPE html>
-<html lang="it">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Gestione Template Pratiche - CRM</title>
+<!-- Container principale -->
+<div class="px-3 py-2">
+    <!-- Header -->
+    <div class="d-flex justify-content-between align-items-center mb-3">
+        <div>
+            <nav aria-label="breadcrumb">
+                <ol class="breadcrumb mb-1 small">
+                    <li class="breadcrumb-item"><a href="/crm/?action=pratiche">Pratiche</a></li>
+                    <li class="breadcrumb-item active">Gestione Template</li>
+                </ol>
+            </nav>
+            <h4 class="mb-0">
+                <i class="bi bi-file-earmark-text text-primary"></i> Gestione Template
+            </h4>
+        </div>
+        
+        <div>
+            <button class="btn btn-sm btn-outline-secondary" onclick="window.history.back()">
+                <i class="bi bi-arrow-left"></i> Indietro
+            </button>
+            <button class="btn btn-sm btn-primary" data-bs-toggle="modal" data-bs-target="#createTemplateModal">
+                <i class="bi bi-plus-circle"></i> Nuovo Template
+            </button>
+        </div>
+    </div>
     
-    <style>
-        /* Layout principale */
-        .templates-container {
-            max-width: 1400px;
-            margin: 0 auto;
-            padding: 1.5rem;
-        }
-        
-        .templates-header {
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            margin-bottom: 2rem;
-        }
-        
-        .templates-main {
-            display: grid;
-            grid-template-columns: 1fr 400px;
-            gap: 2rem;
-        }
-        
-        @media (max-width: 1024px) {
-            .templates-main {
-                grid-template-columns: 1fr;
-            }
-        }
-        
-        /* Cards */
-        .card {
-            background: white;
-            border-radius: 12px;
-            padding: 1.5rem;
-            box-shadow: 0 2px 8px rgba(0,0,0,0.08);
-        }
-        
-        .card-title {
-            font-size: 1.125rem;
-            font-weight: 600;
-            color: #1f2937;
-            margin-bottom: 1rem;
-        }
-        
-        /* Template groups */
-        .template-group {
-            margin-bottom: 2rem;
-        }
-        
-        .template-group-header {
-            display: flex;
-            align-items: center;
-            gap: 0.5rem;
-            margin-bottom: 1rem;
-            padding-bottom: 0.75rem;
-            border-bottom: 2px solid #e5e7eb;
-        }
-        
-        .template-group-title {
-            font-size: 1rem;
-            font-weight: 600;
-            color: #374151;
-        }
-        
-        .template-group-icon {
-            font-size: 1.25rem;
-        }
-        
-        /* Template items */
-        .template-item {
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            padding: 1rem;
-            margin-bottom: 0.75rem;
-            background: #f9fafb;
-            border: 1px solid #e5e7eb;
-            border-radius: 8px;
-            transition: all 0.2s;
-        }
-        
-        .template-item:hover {
-            background: #f3f4f6;
-            border-color: #d1d5db;
-        }
-        
-        .template-item.inactive {
-            opacity: 0.6;
-        }
-        
-        .template-info {
-            flex: 1;
-        }
-        
-        .template-name {
-            font-weight: 500;
-            color: #1f2937;
-            font-size: 0.875rem;
-        }
-        
-        .template-meta {
-            display: flex;
-            gap: 1rem;
-            margin-top: 0.25rem;
-            font-size: 0.75rem;
-            color: #6b7280;
-        }
-        
-        .template-actions {
-            display: flex;
-            gap: 0.5rem;
-        }
-        
-        .btn-icon {
-            padding: 0.375rem;
-            border: 1px solid #e5e7eb;
-            background: white;
-            border-radius: 4px;
-            cursor: pointer;
-            transition: all 0.15s;
-            font-size: 0.875rem;
-        }
-        
-        .btn-icon:hover {
-            background: #f9fafb;
-            border-color: #d1d5db;
-        }
-        
-        /* Form template */
-        .template-form {
-            background: white;
-            border-radius: 12px;
-            padding: 1.5rem;
-            box-shadow: 0 2px 8px rgba(0,0,0,0.08);
-        }
-        
-        .form-group {
-            margin-bottom: 1.5rem;
-        }
-        
-        .form-group label {
-            display: block;
-            font-size: 0.875rem;
-            font-weight: 500;
-            color: #374151;
-            margin-bottom: 0.5rem;
-        }
-        
-        .form-group input,
-        .form-group select,
-        .form-group textarea {
-            width: 100%;
-            padding: 0.75rem;
-            border: 1px solid #d1d5db;
-            border-radius: 6px;
-            font-size: 0.875rem;
-        }
-        
-        .form-group textarea {
-            min-height: 80px;
-            resize: vertical;
-        }
-        
-        /* Task builder */
-        .task-builder {
-            margin-top: 2rem;
-            padding-top: 1.5rem;
-            border-top: 1px solid #e5e7eb;
-        }
-        
-        .task-builder-title {
-            font-size: 1rem;
-            font-weight: 600;
-            color: #374151;
-            margin-bottom: 1rem;
-        }
-        
-        .task-list {
-            margin-bottom: 1rem;
-        }
-        
-        .task-item {
-            display: flex;
-            gap: 0.5rem;
-            align-items: center;
-            padding: 0.75rem;
-            margin-bottom: 0.5rem;
-            background: #f9fafb;
-            border: 1px solid #e5e7eb;
-            border-radius: 6px;
-            cursor: move;
-        }
-        
-        .task-item.dragging {
-            opacity: 0.5;
-        }
-        
-        .task-handle {
-            color: #9ca3af;
-            cursor: move;
-        }
-        
-        .task-input {
-            flex: 1;
-            display: grid;
-            grid-template-columns: 2fr 1fr auto;
-            gap: 0.5rem;
-        }
-        
-        .task-input input {
-            padding: 0.5rem;
-            border: 1px solid #e5e7eb;
-            border-radius: 4px;
-            font-size: 0.75rem;
-        }
-        
-        .task-remove {
-            padding: 0.375rem;
-            background: #fee2e2;
-            border: 1px solid #fecaca;
-            border-radius: 4px;
-            color: #ef4444;
-            cursor: pointer;
-            font-size: 0.75rem;
-        }
-        
-        .task-remove:hover {
-            background: #fecaca;
-        }
-        
-        .add-task-btn {
-            width: 100%;
-            padding: 0.75rem;
-            border: 2px dashed #d1d5db;
-            background: white;
-            border-radius: 6px;
-            color: #6b7280;
-            cursor: pointer;
-            transition: all 0.15s;
-            font-size: 0.875rem;
-        }
-        
-        .add-task-btn:hover {
-            border-color: #9ca3af;
-            color: #374151;
-        }
-        
-        /* Stats */
-        .stats-grid {
-            display: grid;
-            grid-template-columns: repeat(3, 1fr);
-            gap: 1rem;
-            margin-bottom: 2rem;
-        }
-        
-        .stat-card {
-            background: #f9fafb;
-            padding: 1rem;
-            border-radius: 8px;
-            text-align: center;
-        }
-        
-        .stat-value {
-            font-size: 1.5rem;
-            font-weight: 600;
-            color: #007849;
-        }
-        
-        .stat-label {
-            font-size: 0.75rem;
-            color: #6b7280;
-            margin-top: 0.25rem;
-        }
-        
-        /* Actions */
-        .form-actions {
-            display: flex;
-            gap: 1rem;
-            margin-top: 2rem;
-        }
-        
-        .btn {
-            padding: 0.75rem 1.5rem;
-            border: none;
-            border-radius: 6px;
-            font-size: 0.875rem;
-            font-weight: 500;
-            cursor: pointer;
-            transition: all 0.2s;
-        }
-        
-        .btn-primary {
-            background: #007849;
-            color: white;
-        }
-        
-        .btn-primary:hover {
-            background: #005a37;
-            transform: translateY(-1px);
-            box-shadow: 0 4px 12px rgba(0,120,73,0.3);
-        }
-        
-        .btn-secondary {
-            background: #f3f4f6;
-            color: #374151;
-        }
-        
-        .btn-secondary:hover {
-            background: #e5e7eb;
-        }
-        
-        /* Empty state */
-        .empty-state {
-            text-align: center;
-            padding: 3rem;
-            color: #6b7280;
-        }
-        
-        .empty-state-icon {
-            font-size: 3rem;
-            margin-bottom: 1rem;
-            opacity: 0.3;
-        }
-    </style>
-</head>
-<body>
-    <div class="app-layout">
-        <?php include $_SERVER['DOCUMENT_ROOT'] . '/crm/components/navigation.php'; ?>
-        
-        <div class="content-wrapper">
-            <div class="templates-container">
-                <!-- Header -->
-                <div class="templates-header">
-                    <div>
-                        <h1 style="font-size: 1.5rem; font-weight: 600; color: #1f2937;">
-                            Gestione Template Pratiche
-                        </h1>
-                        <p style="font-size: 0.875rem; color: #6b7280; margin-top: 0.25rem;">
-                            Definisci template riutilizzabili per velocizzare la creazione delle pratiche
-                        </p>
-                    </div>
-                    
-                    <div>
-                        <button class="btn btn-primary" onclick="showNewTemplateForm()">
-                            + Nuovo Template
-                        </button>
-                    </div>
+    <div class="row">
+        <!-- Lista template (sinistra) -->
+        <div class="col-md-4">
+            <div class="card shadow-sm">
+                <div class="card-header bg-light">
+                    <h6 class="mb-0">Template Disponibili</h6>
                 </div>
-                
-                <!-- Stats -->
-                <div class="stats-grid">
-                    <div class="stat-card">
-                        <div class="stat-value"><?= count($templates) ?></div>
-                        <div class="stat-label">Template totali</div>
-                    </div>
-                    
-                    <div class="stat-card">
-                        <div class="stat-value">
-                            <?= count(array_filter($templates, fn($t) => $t['is_attivo'])) ?>
-                        </div>
-                        <div class="stat-label">Template attivi</div>
-                    </div>
-                    
-                    <div class="stat-card">
-                        <div class="stat-value">
-                            <?= array_sum(array_column($templates, 'utilizzi_count')) ?>
-                        </div>
-                        <div class="stat-label">Utilizzi totali</div>
-                    </div>
-                </div>
-                
-                <!-- Main content -->
-                <div class="templates-main">
-                    <!-- Templates list -->
-                    <div>
-                        <?php if (empty($templates)): ?>
-                            <div class="card">
-                                <div class="empty-state">
-                                    <div class="empty-state-icon">📋</div>
-                                    <h3 style="font-size: 1.125rem; font-weight: 600; margin-bottom: 0.5rem;">
-                                        Nessun template creato
-                                    </h3>
-                                    <p>Crea il tuo primo template per velocizzare la creazione delle pratiche</p>
+                <div class="card-body p-0">
+                    <div class="list-group list-group-flush">
+                        <?php foreach (PRATICHE_TYPES as $tipo => $config): ?>
+                            <?php if (isset($templatesByType[$tipo]) && count($templatesByType[$tipo]) > 0): ?>
+                                <div class="list-group-item bg-light">
+                                    <small class="text-muted fw-bold">
+                                        <?= $config['icon'] ?> <?= $config['label'] ?>
+                                    </small>
                                 </div>
-                            </div>
-                        <?php else: ?>
-                            <?php foreach (PRATICHE_TYPES as $typeKey => $typeConfig): ?>
-                                <?php if (isset($templatesByType[$typeKey]) && !empty($templatesByType[$typeKey])): ?>
-                                    <div class="template-group">
-                                        <div class="template-group-header">
-                                            <span class="template-group-icon"><?= $typeConfig['icon'] ?></span>
-                                            <h3 class="template-group-title"><?= $typeConfig['label'] ?></h3>
-                                        </div>
-                                        
-                                        <?php foreach ($templatesByType[$typeKey] as $template): ?>
-                                            <div class="template-item <?= !$template['is_attivo'] ? 'inactive' : '' ?>">
-                                                <div class="template-info">
-                                                    <div class="template-name">
-                                                        <?= htmlspecialchars($template['nome']) ?>
-                                                    </div>
-                                                    <div class="template-meta">
-                                                        <span>📋 <?= $template['task_count'] ?> task</span>
-                                                        <span>🔄 <?= $template['utilizzi_count'] ?> utilizzi</span>
-                                                        <span>⏱️ <?= $template['ore_stimate_totali'] ?>h stimate</span>
-                                                    </div>
-                                                </div>
-                                                
-                                                <div class="template-actions">
-                                                    <button class="btn-icon" 
-                                                            onclick="editTemplate(<?= $template['id'] ?>)"
-                                                            title="Modifica">
-                                                        ✏️
-                                                    </button>
-                                                    
-                                                    <button class="btn-icon" 
-                                                            onclick="toggleTemplate(<?= $template['id'] ?>, <?= $template['is_attivo'] ?>)"
-                                                            title="<?= $template['is_attivo'] ? 'Disattiva' : 'Attiva' ?>">
-                                                        <?= $template['is_attivo'] ? '⏸️' : '▶️' ?>
-                                                    </button>
-                                                    
-                                                    <?php if ($template['utilizzi_count'] == 0): ?>
-                                                        <button class="btn-icon" 
-                                                                onclick="deleteTemplate(<?= $template['id'] ?>)"
-                                                                title="Elimina"
-                                                                style="color: #ef4444;">
-                                                            🗑️
-                                                        </button>
-                                                    <?php endif; ?>
-                                                </div>
+                                
+                                <?php foreach ($templatesByType[$tipo] as $template): ?>
+                                    <a href="?action=pratiche&view=templates&edit=<?= $template['id'] ?>" 
+                                       class="list-group-item list-group-item-action <?= $selectedTemplate && $selectedTemplate['id'] == $template['id'] ? 'active' : '' ?>">
+                                        <div class="d-flex justify-content-between align-items-center">
+                                            <div>
+                                                <h6 class="mb-0"><?= htmlspecialchars($template['nome']) ?></h6>
+                                                <small class="text-muted">
+                                                    <?= $template['task_count'] ?> task • 
+                                                    <?= $template['ore_totali_stimate'] ?>h • 
+                                                    <?= $template['utilizzi_count'] ?> utilizzi
+                                                </small>
                                             </div>
-                                        <?php endforeach; ?>
-                                    </div>
-                                <?php endif; ?>
-                            <?php endforeach; ?>
+                                            <?php if (!$template['is_attivo']): ?>
+                                                <span class="badge bg-secondary">Disattivo</span>
+                                            <?php endif; ?>
+                                        </div>
+                                    </a>
+                                <?php endforeach; ?>
+                            <?php endif; ?>
+                        <?php endforeach; ?>
+                        
+                        <?php if (empty($templates)): ?>
+                            <div class="list-group-item text-center text-muted py-5">
+                                <i class="bi bi-inbox display-4"></i>
+                                <p class="mt-2">Nessun template creato</p>
+                            </div>
                         <?php endif; ?>
-                    </div>
-                    
-                    <!-- Form template -->
-                    <div>
-                        <div class="template-form" id="templateForm" style="<?= $selectedTemplate ? '' : 'display: none;' ?>">
-                            <h3 class="card-title">
-                                <?= $selectedTemplate ? 'Modifica Template' : 'Nuovo Template' ?>
-                            </h3>
-                            
-                            <form method="POST" action="" id="templateFormElement">
-                                <input type="hidden" name="action" value="<?= $selectedTemplate ? 'update_template' : 'create_template' ?>">
-                                <?php if ($selectedTemplate): ?>
-                                    <input type="hidden" name="template_id" value="<?= $selectedTemplate['id'] ?>">
-                                <?php endif; ?>
-                                
-                                <div class="form-group">
-                                    <label for="nome">Nome template *</label>
-                                    <input type="text" 
-                                           id="nome" 
-                                           name="nome" 
-                                           value="<?= $selectedTemplate ? htmlspecialchars($selectedTemplate['nome']) : '' ?>"
-                                           required
-                                           placeholder="es. Dichiarazione Redditi Standard">
-                                </div>
-                                
-                                <div class="form-group">
-                                    <label for="tipo_pratica">Tipo pratica *</label>
-                                    <select id="tipo_pratica" name="tipo_pratica" required>
-                                        <option value="">-- Seleziona tipo --</option>
-                                        <?php foreach (PRATICHE_TYPES as $key => $type): ?>
-                                            <option value="<?= $key ?>" 
-                                                    <?= $selectedTemplate && $selectedTemplate['tipo_pratica'] == $key ? 'selected' : '' ?>>
-                                                <?= $type['icon'] ?> <?= $type['label'] ?>
-                                            </option>
-                                        <?php endforeach; ?>
-                                    </select>
-                                </div>
-                                
-                                <div class="form-group">
-                                    <label for="descrizione">Descrizione</label>
-                                    <textarea id="descrizione" 
-                                              name="descrizione" 
-                                              placeholder="Descrivi quando utilizzare questo template..."><?= $selectedTemplate ? htmlspecialchars($selectedTemplate['descrizione']) : '' ?></textarea>
-                                </div>
-                                
-                                <!-- Task builder -->
-                                <div class="task-builder">
-                                    <h4 class="task-builder-title">Task del template</h4>
-                                    
-                                    <div class="task-list" id="taskList">
-                                        <?php if ($templateTasks): ?>
-                                            <?php foreach ($templateTasks as $index => $task): ?>
-                                                <div class="task-item" draggable="true">
-                                                    <span class="task-handle">≡</span>
-                                                    <div class="task-input">
-                                                        <input type="text" 
-                                                               name="tasks[<?= $index ?>][titolo]" 
-                                                               value="<?= htmlspecialchars($task['titolo']) ?>"
-                                                               placeholder="Titolo task" 
-                                                               required>
-                                                        <input type="number" 
-                                                               name="tasks[<?= $index ?>][ore_stimate]" 
-                                                               value="<?= $task['ore_stimate'] ?>"
-                                                               placeholder="Ore" 
-                                                               step="0.5" 
-                                                               min="0.5">
-                                                        <input type="hidden" 
-                                                               name="tasks[<?= $index ?>][ordine]" 
-                                                               value="<?= $index ?>">
-                                                    </div>
-                                                    <button type="button" class="task-remove" onclick="removeTask(this)">
-                                                        ✕
-                                                    </button>
-                                                </div>
-                                            <?php endforeach; ?>
-                                        <?php endif; ?>
-                                    </div>
-                                    
-                                    <button type="button" class="add-task-btn" onclick="addTask()">
-                                        + Aggiungi task
-                                    </button>
-                                </div>
-                                
-                                <div class="form-actions">
-                                    <button type="submit" class="btn btn-primary">
-                                        <?= $selectedTemplate ? 'Salva modifiche' : 'Crea template' ?>
-                                    </button>
-                                    
-                                    <button type="button" class="btn btn-secondary" onclick="cancelEdit()">
-                                        Annulla
-                                    </button>
-                                </div>
-                            </form>
-                        </div>
                     </div>
                 </div>
             </div>
         </div>
-    </div>
-    
-    <script>
-        let taskIndex = <?= count($templateTasks) ?>;
         
-        // Show new template form
-        function showNewTemplateForm() {
-            document.getElementById('templateForm').style.display = 'block';
-            document.getElementById('templateFormElement').reset();
-            document.getElementById('taskList').innerHTML = '';
-            taskIndex = 0;
-            
-            // Aggiungi un task di default
-            addTask();
-        }
-        
-        // Edit template
-        function editTemplate(id) {
-            window.location.href = '?action=pratiche&view=templates&edit=' + id;
-        }
-        
-        // Toggle template
-        function toggleTemplate(id, currentState) {
-            if (confirm(currentState ? 'Disattivare questo template?' : 'Attivare questo template?')) {
-                const form = document.createElement('form');
-                form.method = 'POST';
-                form.innerHTML = `
-                    <input type="hidden" name="action" value="toggle_template">
-                    <input type="hidden" name="template_id" value="${id}">
-                `;
-                document.body.appendChild(form);
-                form.submit();
-            }
-        }
-        
-        // Delete template
-        function deleteTemplate(id) {
-            if (confirm('Eliminare definitivamente questo template?')) {
-                const form = document.createElement('form');
-                form.method = 'POST';
-                form.innerHTML = `
-                    <input type="hidden" name="action" value="delete_template">
-                    <input type="hidden" name="template_id" value="${id}">
-                `;
-                document.body.appendChild(form);
-                form.submit();
-            }
-        }
-        
-        // Cancel edit
-        function cancelEdit() {
-            if (<?= $selectedTemplate ? 'true' : 'false' ?>) {
-                window.location.href = '?action=pratiche&view=templates';
-            } else {
-                document.getElementById('templateForm').style.display = 'none';
-            }
-        }
-        
-        // Add task
-        function addTask() {
-            const taskList = document.getElementById('taskList');
-            const taskHtml = `
-                <div class="task-item" draggable="true">
-                    <span class="task-handle">≡</span>
-                    <div class="task-input">
-                        <input type="text" 
-                               name="tasks[${taskIndex}][titolo]" 
-                               placeholder="Titolo task" 
-                               required>
-                        <input type="number" 
-                               name="tasks[${taskIndex}][ore_stimate]" 
-                               placeholder="Ore" 
-                               step="0.5" 
-                               min="0.5">
-                        <input type="hidden" 
-                               name="tasks[${taskIndex}][ordine]" 
-                               value="${taskIndex}">
+        <!-- Dettaglio template (destra) -->
+        <div class="col-md-8">
+            <?php if ($selectedTemplate): ?>
+                <div class="card shadow-sm">
+                    <div class="card-header bg-light">
+                        <div class="d-flex justify-content-between align-items-center">
+                            <h5 class="mb-0">
+                                <?= htmlspecialchars($selectedTemplate['nome']) ?>
+                            </h5>
+                            <div>
+                                <button class="btn btn-sm btn-outline-primary" 
+                                        data-bs-toggle="modal" 
+                                        data-bs-target="#editTemplateModal">
+                                    <i class="bi bi-pencil"></i> Modifica
+                                </button>
+                                
+                                <form method="POST" class="d-inline" 
+                                      onsubmit="return confirm('Disattivare questo template?')">
+                                    <input type="hidden" name="action" value="toggle_template">
+                                    <input type="hidden" name="template_id" value="<?= $selectedTemplate['id'] ?>">
+                                    <button type="submit" class="btn btn-sm btn-outline-warning">
+                                        <i class="bi bi-toggle-<?= $selectedTemplate['is_attivo'] ? 'on' : 'off' ?>"></i>
+                                        <?= $selectedTemplate['is_attivo'] ? 'Disattiva' : 'Attiva' ?>
+                                    </button>
+                                </form>
+                                
+                                <?php if ($selectedTemplate['utilizzi_count'] == 0): ?>
+                                    <form method="POST" class="d-inline" 
+                                          onsubmit="return confirm('Eliminare definitivamente questo template?')">
+                                        <input type="hidden" name="action" value="delete_template">
+                                        <input type="hidden" name="template_id" value="<?= $selectedTemplate['id'] ?>">
+                                        <button type="submit" class="btn btn-sm btn-outline-danger">
+                                            <i class="bi bi-trash"></i> Elimina
+                                        </button>
+                                    </form>
+                                <?php endif; ?>
+                            </div>
+                        </div>
                     </div>
-                    <button type="button" class="task-remove" onclick="removeTask(this)">
-                        ✕
+                    
+                    <div class="card-body">
+                        <!-- Info template -->
+                        <div class="row mb-4">
+                            <div class="col-md-4">
+                                <label class="text-muted small">Tipo Pratica</label>
+                                <p class="mb-0">
+                                    <?= PRATICHE_TYPES[$selectedTemplate['tipo_pratica']]['icon'] ?>
+                                    <?= PRATICHE_TYPES[$selectedTemplate['tipo_pratica']]['label'] ?>
+                                </p>
+                            </div>
+                            <div class="col-md-2">
+                                <label class="text-muted small">Ore Totali</label>
+                                <p class="mb-0 fw-bold"><?= $selectedTemplate['ore_totali_stimate'] ?>h</p>
+                            </div>
+                            <div class="col-md-2">
+                                <label class="text-muted small">Tariffa</label>
+                                <p class="mb-0">€ <?= number_format($selectedTemplate['tariffa_consigliata'], 2, ',', '.') ?></p>
+                            </div>
+                            <div class="col-md-2">
+                                <label class="text-muted small">Giorni</label>
+                                <p class="mb-0"><?= $selectedTemplate['giorni_completamento'] ?>gg</p>
+                            </div>
+                            <div class="col-md-2">
+                                <label class="text-muted small">Utilizzi</label>
+                                <p class="mb-0"><?= $selectedTemplate['utilizzi_count'] ?></p>
+                            </div>
+                        </div>
+                        
+                        <?php if ($selectedTemplate['descrizione']): ?>
+                            <div class="mb-4">
+                                <label class="text-muted small">Descrizione</label>
+                                <p class="mb-0"><?= nl2br(htmlspecialchars($selectedTemplate['descrizione'])) ?></p>
+                            </div>
+                        <?php endif; ?>
+                        
+                        <!-- Lista task -->
+                        <h6 class="mb-3">Task del Template</h6>
+                        
+                        <?php if (count($templateTasks) > 0): ?>
+                            <div class="table-responsive">
+                                <table class="table table-sm">
+                                    <thead>
+                                        <tr>
+                                            <th width="40">#</th>
+                                            <th>Titolo Task</th>
+                                            <th width="100">Ore Stimate</th>
+                                            <th width="120">Dopo (giorni)</th>
+                                            <th width="100">Obbligatorio</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        <?php foreach ($templateTasks as $task): ?>
+                                            <tr>
+                                                <td class="text-muted"><?= $task['ordine'] ?></td>
+                                                <td>
+                                                    <strong><?= htmlspecialchars($task['titolo']) ?></strong>
+                                                    <?php if ($task['descrizione']): ?>
+                                                        <br>
+                                                        <small class="text-muted">
+                                                            <?= htmlspecialchars($task['descrizione']) ?>
+                                                        </small>
+                                                    <?php endif; ?>
+                                                </td>
+                                                <td><?= $task['ore_stimate'] ?>h</td>
+                                                <td>+<?= $task['giorni_dopo_inizio'] ?></td>
+                                                <td>
+                                                    <?php if ($task['is_obbligatorio']): ?>
+                                                        <span class="badge bg-success">Sì</span>
+                                                    <?php else: ?>
+                                                        <span class="badge bg-secondary">No</span>
+                                                    <?php endif; ?>
+                                                </td>
+                                            </tr>
+                                        <?php endforeach; ?>
+                                    </tbody>
+                                    <tfoot>
+                                        <tr class="fw-bold">
+                                            <td colspan="2">Totale</td>
+                                            <td><?= array_sum(array_column($templateTasks, 'ore_stimate')) ?>h</td>
+                                            <td colspan="2"></td>
+                                        </tr>
+                                    </tfoot>
+                                </table>
+                            </div>
+                        <?php else: ?>
+                            <div class="alert alert-warning">
+                                <i class="bi bi-exclamation-triangle"></i>
+                                Nessun task definito per questo template
+                            </div>
+                        <?php endif; ?>
+                        
+                        <!-- Note operative -->
+                        <?php if ($selectedTemplate['note_operative']): ?>
+                            <div class="mt-4">
+                                <h6>Note Operative</h6>
+                                <div class="alert alert-info">
+                                    <?= nl2br(htmlspecialchars($selectedTemplate['note_operative'])) ?>
+                                </div>
+                            </div>
+                        <?php endif; ?>
+                    </div>
+                </div>
+            <?php else: ?>
+                <div class="card shadow-sm">
+                    <div class="card-body text-center py-5">
+                        <i class="bi bi-arrow-left display-4 text-muted"></i>
+                        <p class="mt-3 text-muted">Seleziona un template dalla lista per visualizzarne i dettagli</p>
+                    </div>
+                </div>
+            <?php endif; ?>
+        </div>
+    </div>
+</div>
+
+<!-- Modal Nuovo Template -->
+<div class="modal fade" id="createTemplateModal" tabindex="-1">
+    <div class="modal-dialog modal-lg">
+        <div class="modal-content">
+            <form method="POST" id="createTemplateForm">
+                <input type="hidden" name="action" value="create_template">
+                
+                <div class="modal-header">
+                    <h5 class="modal-title">Nuovo Template Pratica</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                </div>
+                
+                <div class="modal-body">
+                    <div class="row">
+                        <div class="col-md-8">
+                            <div class="mb-3">
+                                <label class="form-label">Nome Template *</label>
+                                <input type="text" name="nome" class="form-control" required>
+                            </div>
+                        </div>
+                        <div class="col-md-4">
+                            <div class="mb-3">
+                                <label class="form-label">Tipo Pratica *</label>
+                                <select name="tipo_pratica" class="form-select" required>
+                                    <option value="">-- Seleziona --</option>
+                                    <?php foreach (PRATICHE_TYPES as $tipo => $config): ?>
+                                        <option value="<?= $tipo ?>">
+                                            <?= $config['label'] ?>
+                                        </option>
+                                    <?php endforeach; ?>
+                                </select>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <div class="mb-3">
+                        <label class="form-label">Descrizione</label>
+                        <textarea name="descrizione" class="form-control" rows="2"></textarea>
+                    </div>
+                    
+                    <div class="row">
+                        <div class="col-md-4">
+                            <div class="mb-3">
+                                <label class="form-label">Tariffa consigliata (€)</label>
+                                <input type="number" name="tariffa_consigliata" class="form-control" 
+                                       step="0.01" min="0">
+                            </div>
+                        </div>
+                        <div class="col-md-4">
+                            <div class="mb-3">
+                                <label class="form-label">Giorni completamento</label>
+                                <input type="number" name="giorni_completamento" class="form-control" 
+                                       value="30" min="1">
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <!-- Task del template -->
+                    <h6 class="mt-4 mb-3">Task del Template</h6>
+                    
+                    <div id="tasks-container">
+                        <!-- Template task row -->
+                        <div class="task-row mb-2">
+                            <div class="row g-2">
+                                <div class="col-md-6">
+                                    <input type="text" name="tasks[0][titolo]" 
+                                           class="form-control form-control-sm" 
+                                           placeholder="Titolo task">
+                                </div>
+                                <div class="col-md-2">
+                                    <input type="number" name="tasks[0][ore_stimate]" 
+                                           class="form-control form-control-sm" 
+                                           placeholder="Ore" step="0.5" min="0">
+                                </div>
+                                <div class="col-md-2">
+                                    <input type="number" name="tasks[0][ordine]" 
+                                           class="form-control form-control-sm" 
+                                           value="1" min="1">
+                                </div>
+                                <div class="col-md-2">
+                                    <button type="button" class="btn btn-sm btn-danger remove-task">
+                                        <i class="bi bi-trash"></i>
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <button type="button" class="btn btn-sm btn-outline-primary" id="add-task-btn">
+                        <i class="bi bi-plus"></i> Aggiungi Task
                     </button>
                 </div>
-            `;
-            
-            taskList.insertAdjacentHTML('beforeend', taskHtml);
-            taskIndex++;
-            
-            // Re-init drag and drop
-            initDragAndDrop();
-        }
-        
-        // Remove task
-        function removeTask(button) {
-            button.closest('.task-item').remove();
-            updateTaskOrder();
-        }
-        
-        // Update task order
-        function updateTaskOrder() {
-            const tasks = document.querySelectorAll('.task-item');
-            tasks.forEach((task, index) => {
-                const orderInput = task.querySelector('input[name*="[ordine]"]');
-                if (orderInput) {
-                    orderInput.value = index;
-                }
-            });
-        }
-        
-        // Drag and drop
-        function initDragAndDrop() {
-            const tasks = document.querySelectorAll('.task-item');
-            let draggedElement = null;
-            
-            tasks.forEach(task => {
-                task.addEventListener('dragstart', function(e) {
-                    draggedElement = this;
-                    this.classList.add('dragging');
-                });
                 
-                task.addEventListener('dragend', function(e) {
-                    this.classList.remove('dragging');
-                });
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Annulla</button>
+                    <button type="submit" class="btn btn-primary">Crea Template</button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+
+<!-- Modal Modifica Template (se selezionato) -->
+<?php if ($selectedTemplate): ?>
+<div class="modal fade" id="editTemplateModal" tabindex="-1">
+    <div class="modal-dialog modal-lg">
+        <div class="modal-content">
+            <form method="POST">
+                <input type="hidden" name="action" value="update_template">
+                <input type="hidden" name="template_id" value="<?= $selectedTemplate['id'] ?>">
                 
-                task.addEventListener('dragover', function(e) {
-                    e.preventDefault();
-                    const afterElement = getDragAfterElement(this.parentNode, e.clientY);
-                    if (afterElement == null) {
-                        this.parentNode.appendChild(draggedElement);
-                    } else {
-                        this.parentNode.insertBefore(draggedElement, afterElement);
-                    }
-                });
-            });
-        }
-        
-        function getDragAfterElement(container, y) {
-            const draggableElements = [...container.querySelectorAll('.task-item:not(.dragging)')];
-            
-            return draggableElements.reduce((closest, child) => {
-                const box = child.getBoundingClientRect();
-                const offset = y - box.top - box.height / 2;
+                <div class="modal-header">
+                    <h5 class="modal-title">Modifica Template</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                </div>
                 
-                if (offset < 0 && offset > closest.offset) {
-                    return { offset: offset, element: child };
-                } else {
-                    return closest;
-                }
-            }, { offset: Number.NEGATIVE_INFINITY }).element;
+                <div class="modal-body">
+                    <div class="row">
+                        <div class="col-md-8">
+                            <div class="mb-3">
+                                <label class="form-label">Nome Template *</label>
+                                <input type="text" name="nome" class="form-control" 
+                                       value="<?= htmlspecialchars($selectedTemplate['nome']) ?>" required>
+                            </div>
+                        </div>
+                        <div class="col-md-4">
+                            <div class="mb-3">
+                                <label class="form-label">Tipo Pratica *</label>
+                                <select name="tipo_pratica" class="form-select" required>
+                                    <?php foreach (PRATICHE_TYPES as $tipo => $config): ?>
+                                        <option value="<?= $tipo ?>" 
+                                                <?= $selectedTemplate['tipo_pratica'] == $tipo ? 'selected' : '' ?>>
+                                            <?= $config['label'] ?>
+                                        </option>
+                                    <?php endforeach; ?>
+                                </select>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <div class="mb-3">
+                        <label class="form-label">Descrizione</label>
+                        <textarea name="descrizione" class="form-control" rows="2"><?= htmlspecialchars($selectedTemplate['descrizione'] ?? '') ?></textarea>
+                    </div>
+                    
+                    <!-- Task esistenti -->
+                    <h6 class="mt-4 mb-3">Task del Template</h6>
+                    
+                    <div id="edit-tasks-container">
+                        <?php foreach ($templateTasks as $index => $task): ?>
+                            <div class="task-row mb-2">
+                                <div class="row g-2">
+                                    <div class="col-md-6">
+                                        <input type="text" name="tasks[<?= $index ?>][titolo]" 
+                                               class="form-control form-control-sm" 
+                                               value="<?= htmlspecialchars($task['titolo']) ?>"
+                                               placeholder="Titolo task">
+                                    </div>
+                                    <div class="col-md-2">
+                                        <input type="number" name="tasks[<?= $index ?>][ore_stimate]" 
+                                               class="form-control form-control-sm" 
+                                               value="<?= $task['ore_stimate'] ?>"
+                                               placeholder="Ore" step="0.5" min="0">
+                                    </div>
+                                    <div class="col-md-2">
+                                        <input type="number" name="tasks[<?= $index ?>][ordine]" 
+                                               class="form-control form-control-sm" 
+                                               value="<?= $task['ordine'] ?>" min="1">
+                                    </div>
+                                    <div class="col-md-2">
+                                        <button type="button" class="btn btn-sm btn-danger remove-task">
+                                            <i class="bi bi-trash"></i>
+                                        </button>
+                                    </div>
+                                </div>
+                            </div>
+                        <?php endforeach; ?>
+                    </div>
+                    
+                    <button type="button" class="btn btn-sm btn-outline-primary" id="add-edit-task-btn">
+                        <i class="bi bi-plus"></i> Aggiungi Task
+                    </button>
+                </div>
+                
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Annulla</button>
+                    <button type="submit" class="btn btn-primary">Salva Modifiche</button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+<?php endif; ?>
+
+<!-- JavaScript -->
+<script>
+// Gestione aggiunta/rimozione task dinamici
+document.addEventListener('DOMContentLoaded', function() {
+    let taskIndex = 1;
+    let editTaskIndex = <?= count($templateTasks) ?>;
+    
+    // Nuovo template
+    document.getElementById('add-task-btn')?.addEventListener('click', function() {
+        const container = document.getElementById('tasks-container');
+        const newRow = createTaskRow(taskIndex++);
+        container.appendChild(newRow);
+    });
+    
+    // Modifica template
+    document.getElementById('add-edit-task-btn')?.addEventListener('click', function() {
+        const container = document.getElementById('edit-tasks-container');
+        const newRow = createTaskRow(editTaskIndex++);
+        container.appendChild(newRow);
+    });
+    
+    // Rimozione task
+    document.addEventListener('click', function(e) {
+        if (e.target.classList.contains('remove-task') || e.target.closest('.remove-task')) {
+            const row = e.target.closest('.task-row');
+            if (row) {
+                row.remove();
+            }
         }
-        
-        // Init on load
-        document.addEventListener('DOMContentLoaded', function() {
-            initDragAndDrop();
-        });
-        
-        // Update order on form submit
-        document.getElementById('templateFormElement').addEventListener('submit', function(e) {
-            updateTaskOrder();
-        });
-    </script>
-</body>
-</html>
+    });
+    
+    function createTaskRow(index) {
+        const div = document.createElement('div');
+        div.className = 'task-row mb-2';
+        div.innerHTML = `
+            <div class="row g-2">
+                <div class="col-md-6">
+                    <input type="text" name="tasks[${index}][titolo]" 
+                           class="form-control form-control-sm" 
+                           placeholder="Titolo task">
+                </div>
+                <div class="col-md-2">
+                    <input type="number" name="tasks[${index}][ore_stimate]" 
+                           class="form-control form-control-sm" 
+                           placeholder="Ore" step="0.5" min="0">
+                </div>
+                <div class="col-md-2">
+                    <input type="number" name="tasks[${index}][ordine]" 
+                           class="form-control form-control-sm" 
+                           value="${index + 1}" min="1">
+                </div>
+                <div class="col-md-2">
+                    <button type="button" class="btn btn-sm btn-danger remove-task">
+                        <i class="bi bi-trash"></i>
+                    </button>
+                </div>
+            </div>
+        `;
+        return div;
+    }
+});
+</script>
 
 <?php
-// Helper functions
+// Include footer
+require_once $_SERVER['DOCUMENT_ROOT'] . '/crm/components/footer.php';
 
+// Funzioni helper per gestione template
 function createTemplate($data, $db) {
     try {
         $db->beginTransaction();
@@ -808,8 +595,10 @@ function createTemplate($data, $db) {
             'nome' => $data['nome'],
             'tipo_pratica' => $data['tipo_pratica'],
             'descrizione' => $data['descrizione'] ?? '',
-            'ore_stimate_totali' => 0, // Calcolato dopo
-            'is_attivo' => 1
+            'tariffa_consigliata' => floatval($data['tariffa_consigliata'] ?? 0),
+            'giorni_completamento' => intval($data['giorni_completamento'] ?? 30),
+            'is_attivo' => 1,
+            'created_by' => $_SESSION['user_id'] ?? null
         ]);
         
         // Inserisci task
@@ -831,7 +620,7 @@ function createTemplate($data, $db) {
         
         // Aggiorna ore totali
         $db->update('pratiche_template', 
-            ['ore_stimate_totali' => $oreTotali],
+            ['ore_totali_stimate' => $oreTotali],
             'id = ?',
             [$templateId]
         );
@@ -882,7 +671,7 @@ function updateTemplate($data, $db) {
         
         // Aggiorna ore totali
         $db->update('pratiche_template', 
-            ['ore_stimate_totali' => $oreTotali],
+            ['ore_totali_stimate' => $oreTotali],
             'id = ?',
             [$templateId]
         );
@@ -930,26 +719,29 @@ function deleteTemplate($templateId, $db) {
 
 function toggleTemplate($templateId, $db) {
     try {
-        $template = $db->selectOne(
-            "SELECT is_attivo FROM pratiche_template WHERE id = ?",
+        // Recupera stato attuale
+        $template = $db->selectOne("SELECT is_attivo FROM pratiche_template WHERE id = ?", [$templateId]);
+        
+        if (!$template) {
+            $_SESSION['error_message'] = '⚠️ Template non trovato';
+            return;
+        }
+        
+        // Inverti stato
+        $nuovoStato = !$template['is_attivo'];
+        
+        $db->update('pratiche_template', 
+            ['is_attivo' => $nuovoStato],
+            'id = ?',
             [$templateId]
         );
         
-        if ($template) {
-            $newStatus = !$template['is_attivo'];
-            $db->update('pratiche_template',
-                ['is_attivo' => $newStatus],
-                'id = ?',
-                [$templateId]
-            );
-            
-            $_SESSION['success_message'] = $newStatus ? 
-                '✅ Template attivato' : 
-                '✅ Template disattivato';
-        }
+        $_SESSION['success_message'] = $nuovoStato ? 
+            '✅ Template attivato' : 
+            '✅ Template disattivato';
         
     } catch (Exception $e) {
-        $_SESSION['error_message'] = '❌ Errore durante l\'aggiornamento dello stato';
+        $_SESSION['error_message'] = '❌ Errore durante la modifica dello stato';
         error_log("Errore toggle template: " . $e->getMessage());
     }
 }
