@@ -18,6 +18,7 @@
     --primary-green-hover: #005a37;
     --primary-green-light: #f0fdf4;
     --primary-green-lighter: #dcfce7;
+    --background-color: #d9cfc4;
     
     /* Grigi Neutri Professionali */
     --gray-50: #f9fafb;
@@ -84,7 +85,7 @@ body {
     font-size: 0.875rem;
     line-height: 1.5;
     color: var(--gray-700);
-    background: var(--gray-50);
+     background: var(--background-color) !important;
     -webkit-font-smoothing: antialiased;
     -moz-osx-font-smoothing: grayscale;
 }

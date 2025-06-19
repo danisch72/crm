@@ -48,10 +48,10 @@ if ($filterStato && $filterStato !== 'all') {
 
 // Se non admin, mostra solo le proprie pratiche
 if (!$currentUser['is_admin']) {
-    $whereConditions[] = "p.operatore_assegnato_id = ?";
+    $whereConditions[] = "p.operatore_responsabile_id = ?";
     $params[] = $currentUser['id'];
 } else if ($filterOperatore) {
-    $whereConditions[] = "p.operatore_assegnato_id = ?";
+    $whereConditions[] = "p.operatore_responsabile_id = ?";
     $params[] = $filterOperatore;
 }
 
@@ -66,16 +66,16 @@ $query = "
         CONCAT(o.nome, ' ', o.cognome) as operatore_nome,
         COUNT(DISTINCT t.id) as totale_task,
         COUNT(DISTINCT CASE WHEN t.stato = 'completato' THEN t.id END) as task_completati,
-        COALESCE(p.ore_lavorate, 0) as ore_totali_lavorate,
+        COALESCE(SUM(t.ore_lavorate), 0) as ore_totali_lavorate,
         DATEDIFF(p.data_scadenza, CURDATE()) as giorni_scadenza
     FROM pratiche p
     LEFT JOIN clienti c ON p.cliente_id = c.id
-    LEFT JOIN operatori o ON p.operatore_assegnato_id = o.id
+    LEFT JOIN operatori o ON p.operatore_responsabile_id = o.id
     LEFT JOIN task t ON p.id = t.pratica_id
     WHERE $whereClause
     GROUP BY p.id
     ORDER BY 
-        FIELD(p.priorita, 'urgente', 'alta', 'media', 'bassa'),
+        FIELD(p.stato, 'urgente', 'alta', 'media', 'bassa'),
         p.data_scadenza ASC
 ";
 
@@ -131,7 +131,7 @@ if ($currentUser['is_admin']) {
         SELECT DISTINCT c.id, c.ragione_sociale 
         FROM clienti c
         INNER JOIN pratiche p ON c.id = p.cliente_id
-        WHERE p.operatore_assegnato_id = ? AND c.stato = 'attivo'
+        WHERE p.operatore_responsabile_id = ? AND c.stato = 'attivo'
         ORDER BY c.ragione_sociale
     ", [$currentUser['id']]);
 }

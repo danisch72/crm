@@ -1,17 +1,20 @@
 <?php
 /**
- * modules/pratiche/api/task_api.php - API Gestione Task
+ * modules/pratiche/api/task_api.php - API Task Management COMPLETA
  * 
- * ✅ API REST PER OPERAZIONI SUI TASK
+ * ✅ GESTIONE COMPLETA TASK VIA API
  * 
  * Endpoints:
- * - start_task: Avvia un task
- * - complete_task: Completa un task  
- * - pause_task: Mette in pausa un task
- * - update_task: Aggiorna informazioni task
- * - delete_task: Elimina un task
- * - reassign_task: Riassegna task con conferma
- * - reorder_tasks: Riordina i task
+ * - create: Crea nuovo task
+ * - update_status: Aggiorna stato task
+ * - update_field: Aggiorna campo singolo
+ * - update_order: Aggiorna ordinamento
+ * - start_tracking: Avvia tracking temporale
+ * - complete_task: Completa task
+ * - pause_task: Mette in pausa
+ * - assign_task: Assegna/riassegna operatore
+ * - delete: Elimina task
+ * - export: Esporta task pratica
  */
 
 // Include bootstrap per autenticazione
@@ -27,9 +30,14 @@ if (!isAuthenticated()) {
 // Headers JSON
 header('Content-Type: application/json');
 
-// Ottieni dati POST
-$input = json_decode(file_get_contents('php://input'), true);
-$action = $input['action'] ?? '';
+// Ottieni dati
+$method = $_SERVER['REQUEST_METHOD'];
+if ($method === 'POST') {
+    $input = json_decode(file_get_contents('php://input'), true);
+    $action = $input['action'] ?? '';
+} else {
+    $action = $_GET['action'] ?? '';
+}
 
 // Carica database
 loadDatabase();
@@ -41,8 +49,24 @@ require_once dirname(__DIR__) . '/config.php';
 
 // Router azioni
 switch ($action) {
-    case 'start_task':
-        startTask($input, $db, $currentUser);
+    case 'create':
+        createTask($input, $db, $currentUser);
+        break;
+        
+    case 'update_status':
+        updateTaskStatus($input, $db, $currentUser);
+        break;
+        
+    case 'update_field':
+        updateTaskField($input, $db, $currentUser);
+        break;
+        
+    case 'update_order':
+        updateTaskOrder($input, $db);
+        break;
+        
+    case 'start_tracking':
+        startTracking($input, $db, $currentUser);
         break;
         
     case 'complete_task':
@@ -53,20 +77,16 @@ switch ($action) {
         pauseTask($input, $db, $currentUser);
         break;
         
-    case 'update_task':
-        updateTask($input, $db, $currentUser);
+    case 'assign_task':
+        assignTask($input, $db, $currentUser);
         break;
         
-    case 'delete_task':
+    case 'delete':
         deleteTask($input, $db, $currentUser);
         break;
         
-    case 'reassign_task':
-        reassignTask($input, $db, $currentUser);
-        break;
-        
-    case 'reorder_tasks':
-        reorderTasks($input, $db, $currentUser);
+    case 'export':
+        exportTasks($_GET, $db, $currentUser);
         break;
         
     default:
@@ -75,19 +95,120 @@ switch ($action) {
 }
 
 /**
- * Avvia un task
+ * CREA NUOVO TASK
  */
-function startTask($input, $db, $user) {
+function createTask($input, $db, $user) {
+    try {
+        // Validazione campi obbligatori
+        if (empty($input['pratica_id']) || empty($input['titolo'])) {
+            echo json_encode(['success' => false, 'message' => 'Campi obbligatori mancanti']);
+            return;
+        }
+        
+        // Verifica che la pratica esista e l'utente abbia accesso
+        $pratica = $db->selectOne(
+            "SELECT p.*, c.ragione_sociale as cliente_nome
+             FROM pratiche p
+             LEFT JOIN clienti c ON p.cliente_id = c.id
+             WHERE p.id = ?",
+            [$input['pratica_id']]
+        );
+        
+        if (!$pratica) {
+            echo json_encode(['success' => false, 'message' => 'Pratica non trovata']);
+            return;
+        }
+        
+        // Verifica permessi (solo admin o operatore assegnato)
+        if (!$user['is_admin'] && $pratica['operatore_assegnato_id'] != $user['id']) {
+            echo json_encode(['success' => false, 'message' => 'Non hai i permessi per questa pratica']);
+            return;
+        }
+        
+        // Ottieni il prossimo ordine
+        $maxOrdine = $db->selectOne(
+            "SELECT MAX(ordine) as max_ordine FROM task WHERE pratica_id = ?",
+            [$input['pratica_id']]
+        );
+        $nuovoOrdine = ($maxOrdine['max_ordine'] ?? 0) + 1;
+        
+        // Prepara dati per inserimento
+        $taskData = [
+            'pratica_id' => $input['pratica_id'],
+            'titolo' => trim($input['titolo']),
+            'descrizione' => trim($input['descrizione'] ?? ''),
+            'stato' => 'da_iniziare',
+            'operatore_assegnato_id' => $input['operatore_assegnato_id'] ?: null,
+            'ore_stimate' => floatval($input['ore_stimate'] ?? 0),
+            'data_scadenza' => $input['data_scadenza'] ?: null,
+            'is_obbligatorio' => isset($input['is_obbligatorio']) && $input['is_obbligatorio'] ? 1 : 0,
+            'dipende_da_task_id' => $input['dipende_da_task_id'] ?: null,
+            'ordine' => $nuovoOrdine,
+            'created_at' => date('Y-m-d H:i:s'),
+            'created_by' => $user['id']
+        ];
+        
+        // Inserisci task
+        $taskId = $db->insert('task', $taskData);
+        
+        if ($taskId) {
+            // Log attività
+            logActivity('task_created', $taskId, $user['id'], $db);
+            
+            // Aggiorna progress pratica
+            updatePraticaProgress($input['pratica_id'], $db);
+            
+            // Se assegnato, notifica operatore
+            if ($taskData['operatore_assegnato_id'] && $taskData['operatore_assegnato_id'] != $user['id']) {
+                notifyOperatorAssignment($taskId, $taskData['operatore_assegnato_id'], $db);
+            }
+            
+            echo json_encode([
+                'success' => true,
+                'message' => 'Task creato con successo',
+                'task_id' => $taskId
+            ]);
+            
+        } else {
+            throw new Exception('Errore durante l\'inserimento del task');
+        }
+        
+    } catch (Exception $e) {
+        error_log("Errore creazione task: " . $e->getMessage());
+        echo json_encode([
+            'success' => false, 
+            'message' => 'Errore durante la creazione del task'
+        ]);
+    }
+}
+
+/**
+ * Aggiorna stato task
+ */
+function updateTaskStatus($input, $db, $user) {
     $taskId = $input['task_id'] ?? 0;
+    $nuovoStato = $input['stato'] ?? '';
     
-    if (!$taskId) {
-        echo json_encode(['success' => false, 'message' => 'Task ID mancante']);
+    if (!$taskId || !$nuovoStato) {
+        echo json_encode(['success' => false, 'message' => 'Parametri mancanti']);
+        return;
+    }
+    
+    // Verifica stati validi
+    if (!isset(TASK_STATI[$nuovoStato])) {
+        echo json_encode(['success' => false, 'message' => 'Stato non valido']);
         return;
     }
     
     try {
         // Carica task
-        $task = $db->selectOne("SELECT * FROM task WHERE id = ?", [$taskId]);
+        $task = $db->selectOne(
+            "SELECT t.*, p.operatore_assegnato_id as pratica_operatore_id 
+             FROM task t 
+             INNER JOIN pratiche p ON t.pratica_id = p.id 
+             WHERE t.id = ?",
+            [$taskId]
+        );
         
         if (!$task) {
             echo json_encode(['success' => false, 'message' => 'Task non trovato']);
@@ -95,85 +216,152 @@ function startTask($input, $db, $user) {
         }
         
         // Verifica permessi
-        if (!$user['is_admin'] && $task['operatore_assegnato_id'] != $user['id']) {
-            echo json_encode(['success' => false, 'message' => 'Non hai i permessi per questo task']);
+        if (!$user['is_admin'] && 
+            $task['operatore_assegnato_id'] != $user['id'] && 
+            $task['pratica_operatore_id'] != $user['id']) {
+            echo json_encode(['success' => false, 'message' => 'Non hai i permessi']);
             return;
         }
         
-        // Verifica dipendenze
-        if ($task['dipende_da_task_id']) {
+        // Verifica dipendenze se si sta iniziando
+        if ($nuovoStato === 'in_corso' && $task['dipende_da_task_id']) {
             $dipendenza = $db->selectOne(
-                "SELECT stato FROM task WHERE id = ?", 
+                "SELECT stato FROM task WHERE id = ?",
                 [$task['dipende_da_task_id']]
             );
             
             if ($dipendenza && $dipendenza['stato'] !== 'completato') {
                 echo json_encode([
                     'success' => false, 
-                    'message' => 'Completa prima il task precedente'
+                    'message' => 'Il task dipendente non è ancora completato'
                 ]);
                 return;
             }
         }
         
-        // Verifica stato attuale
-        if ($task['stato'] === 'completato') {
-            echo json_encode(['success' => false, 'message' => 'Task già completato']);
-            return;
+        // Aggiorna stato
+        $updateData = [
+            'stato' => $nuovoStato,
+            'updated_at' => date('Y-m-d H:i:s')
+        ];
+        
+        // Se completato, registra data
+        if ($nuovoStato === 'completato') {
+            $updateData['data_completamento'] = date('Y-m-d');
         }
         
-        $db->beginTransaction();
+        $db->update('task', $updateData, 'id = ?', [$taskId]);
         
-        // Aggiorna stato task
+        // Log attività
+        logActivity('task_status_changed', $taskId, $user['id'], $db, [
+            'old_status' => $task['stato'],
+            'new_status' => $nuovoStato
+        ]);
+        
+        // Aggiorna progress pratica
+        updatePraticaProgress($task['pratica_id'], $db);
+        
+        echo json_encode([
+            'success' => true,
+            'message' => 'Stato aggiornato con successo'
+        ]);
+        
+    } catch (Exception $e) {
+        error_log("Errore update stato task: " . $e->getMessage());
+        echo json_encode(['success' => false, 'message' => 'Errore durante l\'aggiornamento']);
+    }
+}
+
+/**
+ * Aggiorna campo singolo
+ */
+function updateTaskField($input, $db, $user) {
+    $taskId = $input['task_id'] ?? 0;
+    $field = $input['field'] ?? '';
+    $value = $input['value'] ?? '';
+    
+    // Campi modificabili
+    $allowedFields = [
+        'titolo', 'descrizione', 'ore_stimate', 
+        'data_scadenza', 'is_obbligatorio'
+    ];
+    
+    if (!$taskId || !in_array($field, $allowedFields)) {
+        echo json_encode(['success' => false, 'message' => 'Parametri non validi']);
+        return;
+    }
+    
+    try {
+        // Sanitizza valore
+        switch ($field) {
+            case 'ore_stimate':
+                $value = floatval($value);
+                break;
+            case 'is_obbligatorio':
+                $value = $value ? 1 : 0;
+                break;
+            case 'data_scadenza':
+                $value = $value ?: null;
+                break;
+        }
+        
         $db->update('task', [
-            'stato' => 'in_corso',
-            'data_inizio' => $task['data_inizio'] ?? date('Y-m-d H:i:s'),
+            $field => $value,
             'updated_at' => date('Y-m-d H:i:s')
         ], 'id = ?', [$taskId]);
         
-        // Se è il primo task iniziato, aggiorna anche la pratica
-        $pratica = $db->selectOne(
-            "SELECT stato FROM pratiche WHERE id = ?", 
-            [$task['pratica_id']]
-        );
-        
-        if ($pratica && $pratica['stato'] === 'da_iniziare') {
-            $db->update('pratiche', [
-                'stato' => 'in_corso',
-                'updated_at' => date('Y-m-d H:i:s')
-            ], 'id = ?', [$task['pratica_id']]);
-        }
-        
-        // Crea sessione di tracking
-        $trackingId = $db->insert('tracking_task', [
-            'task_id' => $taskId,
-            'operatore_id' => $user['id'],
-            'data_lavoro' => date('Y-m-d'),
-            'ora_inizio' => date('Y-m-d H:i:s'),
-            'is_completato' => 0
+        echo json_encode([
+            'success' => true,
+            'message' => 'Campo aggiornato'
         ]);
+        
+    } catch (Exception $e) {
+        error_log("Errore update field: " . $e->getMessage());
+        echo json_encode(['success' => false, 'message' => 'Errore durante l\'aggiornamento']);
+    }
+}
+
+/**
+ * Aggiorna ordine task (drag & drop)
+ */
+function updateTaskOrder($input, $db) {
+    $tasks = $input['tasks'] ?? [];
+    
+    if (empty($tasks)) {
+        echo json_encode(['success' => false, 'message' => 'Nessun task da ordinare']);
+        return;
+    }
+    
+    try {
+        $db->beginTransaction();
+        
+        foreach ($tasks as $task) {
+            $db->update('task', 
+                ['ordine' => intval($task['ordine'])],
+                'id = ?',
+                [$task['id']]
+            );
+        }
         
         $db->commit();
         
         echo json_encode([
             'success' => true,
-            'message' => 'Task avviato con successo',
-            'tracking_id' => $trackingId
+            'message' => 'Ordine aggiornato'
         ]);
         
     } catch (Exception $e) {
         $db->rollback();
-        error_log("Errore start task: " . $e->getMessage());
-        echo json_encode(['success' => false, 'message' => 'Errore durante l\'avvio del task']);
+        error_log("Errore update order: " . $e->getMessage());
+        echo json_encode(['success' => false, 'message' => 'Errore durante l\'aggiornamento']);
     }
 }
 
 /**
- * Completa un task
+ * Avvia tracking temporale
  */
-function completeTask($input, $db, $user) {
+function startTracking($input, $db, $user) {
     $taskId = $input['task_id'] ?? 0;
-    $note = $input['note'] ?? '';
     
     if (!$taskId) {
         echo json_encode(['success' => false, 'message' => 'Task ID mancante']);
@@ -181,6 +369,22 @@ function completeTask($input, $db, $user) {
     }
     
     try {
+        // Verifica se c'è già una sessione attiva per l'utente
+        $activeSession = $db->selectOne(
+            "SELECT * FROM tracking_task 
+             WHERE operatore_id = ? 
+             AND ora_fine IS NULL",
+            [$user['id']]
+        );
+        
+        if ($activeSession) {
+            echo json_encode([
+                'success' => false, 
+                'message' => 'Hai già una sessione di tracking attiva'
+            ]);
+            return;
+        }
+        
         // Carica task
         $task = $db->selectOne("SELECT * FROM task WHERE id = ?", [$taskId]);
         
@@ -189,20 +393,60 @@ function completeTask($input, $db, $user) {
             return;
         }
         
-        // Verifica permessi
-        if (!$user['is_admin'] && $task['operatore_assegnato_id'] != $user['id']) {
-            echo json_encode(['success' => false, 'message' => 'Non hai i permessi per questo task']);
+        // Se il task non è in corso, aggiornalo
+        if ($task['stato'] === 'da_iniziare') {
+            $db->update('task', ['stato' => 'in_corso'], 'id = ?', [$taskId]);
+        }
+        
+        // Crea sessione tracking
+        $sessionId = $db->insert('tracking_task', [
+            'task_id' => $taskId,
+            'operatore_id' => $user['id'],
+            'ora_inizio' => date('Y-m-d H:i:s'),
+            'is_attivo' => 1
+        ]);
+        
+        echo json_encode([
+            'success' => true,
+            'message' => 'Tracking avviato',
+            'session_id' => $sessionId
+        ]);
+        
+    } catch (Exception $e) {
+        error_log("Errore start tracking: " . $e->getMessage());
+        echo json_encode(['success' => false, 'message' => 'Errore durante l\'avvio del tracking']);
+    }
+}
+
+/**
+ * Completa task
+ */
+function completeTask($input, $db, $user) {
+    $taskId = $input['task_id'] ?? 0;
+    
+    if (!$taskId) {
+        echo json_encode(['success' => false, 'message' => 'Task ID mancante']);
+        return;
+    }
+    
+    try {
+        $db->beginTransaction();
+        
+        // Carica task
+        $task = $db->selectOne("SELECT * FROM task WHERE id = ?", [$taskId]);
+        
+        if (!$task) {
+            echo json_encode(['success' => false, 'message' => 'Task non trovato']);
             return;
         }
         
-        $db->beginTransaction();
-        
-        // Chiudi eventuali tracking aperti
+        // Chiudi eventuali tracking attivi
         $activeTracking = $db->selectOne(
             "SELECT * FROM tracking_task 
-             WHERE task_id = ? AND ora_fine IS NULL 
-             ORDER BY id DESC LIMIT 1",
-            [$taskId]
+             WHERE task_id = ? 
+             AND operatore_id = ? 
+             AND ora_fine IS NULL",
+            [$taskId, $user['id']]
         );
         
         if ($activeTracking) {
@@ -211,26 +455,15 @@ function completeTask($input, $db, $user) {
             
             $db->update('tracking_task', [
                 'ora_fine' => $oraFine,
-                'ore_lavorate' => round($durata / 60, 2),
-                'note' => $note,
+                'durata_minuti' => round($durata),
                 'is_completato' => 1
             ], 'id = ?', [$activeTracking['id']]);
         }
-        
-        // Calcola ore totali lavorate
-        $oreTotali = $db->selectOne(
-            "SELECT SUM(ore_lavorate) as totale 
-             FROM tracking_task 
-             WHERE task_id = ?",
-            [$taskId]
-        );
         
         // Aggiorna task
         $db->update('task', [
             'stato' => 'completato',
             'data_completamento' => date('Y-m-d'),
-            'ore_lavorate' => $oreTotali['totale'] ?? 0,
-            'percentuale_completamento' => 100,
             'updated_at' => date('Y-m-d H:i:s')
         ], 'id = ?', [$taskId]);
         
@@ -304,7 +537,7 @@ function pauseTask($input, $db, $user) {
         
         $db->update('tracking_task', [
             'ora_fine' => $oraFine,
-            'ore_lavorate' => round($durata / 60, 2),
+            'durata_minuti' => round($durata),
             'note' => 'Pausa: ' . $motivo,
             'is_completato' => 0
         ], 'id = ?', [$activeTracking['id']]);
@@ -322,70 +555,62 @@ function pauseTask($input, $db, $user) {
 }
 
 /**
- * Aggiorna informazioni task
+ * Assegna/riassegna task
  */
-function updateTask($input, $db, $user) {
+function assignTask($input, $db, $user) {
     $taskId = $input['task_id'] ?? 0;
-    $field = $input['field'] ?? '';
-    $value = $input['value'] ?? '';
+    $operatoreId = $input['operatore_id'] ?? 0;
     
-    if (!$taskId || !$field) {
+    if (!$taskId || !$operatoreId) {
         echo json_encode(['success' => false, 'message' => 'Parametri mancanti']);
         return;
     }
     
-    // Campi modificabili
-    $allowedFields = [
-        'titolo', 'descrizione', 'ore_stimate', 
-        'data_scadenza', 'priorita', 'percentuale_completamento'
-    ];
-    
-    if (!in_array($field, $allowedFields)) {
-        echo json_encode(['success' => false, 'message' => 'Campo non modificabile']);
-        return;
-    }
-    
     try {
-        // Verifica permessi
-        $task = $db->selectOne(
-            "SELECT t.*, p.operatore_responsabile_id 
-             FROM task t
-             JOIN pratiche p ON t.pratica_id = p.id
-             WHERE t.id = ?",
-            [$taskId]
+        // Verifica che l'operatore esista
+        $operatore = $db->selectOne(
+            "SELECT * FROM operatori WHERE id = ? AND is_attivo = 1",
+            [$operatoreId]
         );
         
-        if (!$task) {
-            echo json_encode(['success' => false, 'message' => 'Task non trovato']);
+        if (!$operatore) {
+            echo json_encode(['success' => false, 'message' => 'Operatore non valido']);
             return;
         }
         
-        if (!$user['is_admin'] && 
-            $task['operatore_assegnato_id'] != $user['id'] &&
-            $task['operatore_responsabile_id'] != $user['id']) {
-            echo json_encode(['success' => false, 'message' => 'Non hai i permessi']);
-            return;
-        }
+        // Carica task precedente per log
+        $oldTask = $db->selectOne("SELECT operatore_assegnato_id FROM task WHERE id = ?", [$taskId]);
         
-        // Aggiorna
+        // Aggiorna assegnazione
         $db->update('task', [
-            $field => $value,
+            'operatore_assegnato_id' => $operatoreId,
             'updated_at' => date('Y-m-d H:i:s')
         ], 'id = ?', [$taskId]);
         
+        // Log cambio assegnazione
+        logActivity('task_reassigned', $taskId, $user['id'], $db, [
+            'old_operator' => $oldTask['operatore_assegnato_id'],
+            'new_operator' => $operatoreId
+        ]);
+        
+        // Notifica nuovo operatore
+        if ($operatoreId != $user['id']) {
+            notifyOperatorAssignment($taskId, $operatoreId, $db);
+        }
+        
         echo json_encode([
             'success' => true,
-            'message' => 'Task aggiornato'
+            'message' => 'Task riassegnato con successo'
         ]);
         
     } catch (Exception $e) {
-        error_log("Errore update task: " . $e->getMessage());
-        echo json_encode(['success' => false, 'message' => 'Errore durante l\'aggiornamento']);
+        error_log("Errore assign task: " . $e->getMessage());
+        echo json_encode(['success' => false, 'message' => 'Errore durante l\'assegnazione']);
     }
 }
 
 /**
- * Elimina un task
+ * Elimina task
  */
 function deleteTask($input, $db, $user) {
     $taskId = $input['task_id'] ?? 0;
@@ -396,11 +621,13 @@ function deleteTask($input, $db, $user) {
     }
     
     try {
-        // Verifica permessi
+        $db->beginTransaction();
+        
+        // Carica task per verifica permessi
         $task = $db->selectOne(
-            "SELECT t.*, p.operatore_responsabile_id 
-             FROM task t
-             JOIN pratiche p ON t.pratica_id = p.id
+            "SELECT t.*, p.operatore_assegnato_id as pratica_operatore_id 
+             FROM task t 
+             INNER JOIN pratiche p ON t.pratica_id = p.id 
              WHERE t.id = ?",
             [$taskId]
         );
@@ -410,35 +637,38 @@ function deleteTask($input, $db, $user) {
             return;
         }
         
-        if (!$user['is_admin'] && $task['operatore_responsabile_id'] != $user['id']) {
-            echo json_encode(['success' => false, 'message' => 'Solo admin o responsabile possono eliminare']);
+        // Solo admin o operatore responsabile pratica possono eliminare
+        if (!$user['is_admin'] && $task['pratica_operatore_id'] != $user['id']) {
+            echo json_encode(['success' => false, 'message' => 'Non hai i permessi per eliminare']);
             return;
         }
         
-        // Non eliminare se è l'unico task obbligatorio
-        if ($task['is_obbligatorio']) {
-            $altriObbligatori = $db->selectOne(
-                "SELECT COUNT(*) as count 
-                 FROM task 
-                 WHERE pratica_id = ? 
-                 AND id != ? 
-                 AND is_obbligatorio = 1",
-                [$task['pratica_id'], $taskId]
-            );
-            
-            if ($altriObbligatori['count'] == 0) {
-                echo json_encode([
-                    'success' => false, 
-                    'message' => 'Non puoi eliminare l\'unico task obbligatorio'
-                ]);
-                return;
-            }
+        // Verifica che non ci siano dipendenze
+        $dipendenze = $db->selectOne(
+            "SELECT COUNT(*) as count FROM task WHERE dipende_da_task_id = ?",
+            [$taskId]
+        );
+        
+        if ($dipendenze['count'] > 0) {
+            echo json_encode([
+                'success' => false, 
+                'message' => 'Impossibile eliminare: altri task dipendono da questo'
+            ]);
+            return;
         }
         
-        $db->beginTransaction();
+        // Elimina tracking associati
+        $db->delete('tracking_task', 'task_id = ?', [$taskId]);
         
-        // Elimina task (tracking eliminati a cascata)
+        // Elimina task
         $db->delete('task', 'id = ?', [$taskId]);
+        
+        // Riordina task rimanenti
+        $db->execute(
+            "UPDATE task SET ordine = ordine - 1 
+             WHERE pratica_id = ? AND ordine > ?",
+            [$task['pratica_id'], $task['ordine']]
+        );
         
         // Aggiorna progress pratica
         updatePraticaProgress($task['pratica_id'], $db);
@@ -447,7 +677,7 @@ function deleteTask($input, $db, $user) {
         
         echo json_encode([
             'success' => true,
-            'message' => 'Task eliminato'
+            'message' => 'Task eliminato con successo'
         ]);
         
     } catch (Exception $e) {
@@ -458,89 +688,23 @@ function deleteTask($input, $db, $user) {
 }
 
 /**
- * Riassegna task con richiesta conferma
+ * Esporta task pratica
  */
-function reassignTask($input, $db, $user) {
-    $taskId = $input['task_id'] ?? 0;
-    $nuovoOperatoreId = $input['nuovo_operatore_id'] ?? 0;
-    $motivo = $input['motivo'] ?? '';
-    $confermaRichiesta = $input['conferma'] ?? false;
+function exportTasks($params, $db, $user) {
+    $praticaId = $params['pratica_id'] ?? 0;
     
-    if (!$taskId || !$nuovoOperatoreId) {
-        echo json_encode(['success' => false, 'message' => 'Parametri mancanti']);
+    if (!$praticaId) {
+        echo json_encode(['success' => false, 'message' => 'Pratica ID mancante']);
         return;
     }
     
     try {
-        $task = $db->selectOne("SELECT * FROM task WHERE id = ?", [$taskId]);
-        
-        if (!$task) {
-            echo json_encode(['success' => false, 'message' => 'Task non trovato']);
-            return;
-        }
-        
-        // Se non è ancora stata richiesta conferma
-        if (!$confermaRichiesta) {
-            // Aggiorna task con richiesta di conferma
-            $db->update('task', [
-                'richiede_conferma' => 1,
-                'conferma_richiesta_a' => $nuovoOperatoreId,
-                'conferma_richiesta_da' => $user['id'],
-                'updated_at' => date('Y-m-d H:i:s')
-            ], 'id = ?', [$taskId]);
-            
-            // TODO: Invia notifica al nuovo operatore
-            
-            echo json_encode([
-                'success' => true,
-                'message' => 'Richiesta di riassegnazione inviata',
-                'requires_confirmation' => true
-            ]);
-            
-        } else {
-            // Conferma ricevuta, procedi con riassegnazione
-            if ($user['id'] != $task['conferma_richiesta_a']) {
-                echo json_encode(['success' => false, 'message' => 'Solo l\'operatore designato può confermare']);
-                return;
-            }
-            
-            $db->update('task', [
-                'operatore_assegnato_id' => $nuovoOperatoreId,
-                'richiede_conferma' => 0,
-                'conferma_richiesta_a' => null,
-                'conferma_richiesta_da' => null,
-                'conferma_data' => date('Y-m-d H:i:s'),
-                'updated_at' => date('Y-m-d H:i:s')
-            ], 'id = ?', [$taskId]);
-            
-            echo json_encode([
-                'success' => true,
-                'message' => 'Task riassegnato con successo'
-            ]);
-        }
-        
-    } catch (Exception $e) {
-        error_log("Errore reassign task: " . $e->getMessage());
-        echo json_encode(['success' => false, 'message' => 'Errore durante la riassegnazione']);
-    }
-}
-
-/**
- * Riordina i task
- */
-function reorderTasks($input, $db, $user) {
-    $praticaId = $input['pratica_id'] ?? 0;
-    $taskOrder = $input['task_order'] ?? [];
-    
-    if (!$praticaId || empty($taskOrder)) {
-        echo json_encode(['success' => false, 'message' => 'Parametri mancanti']);
-        return;
-    }
-    
-    try {
-        // Verifica permessi sulla pratica
+        // Carica pratica e task
         $pratica = $db->selectOne(
-            "SELECT operatore_responsabile_id FROM pratiche WHERE id = ?",
+            "SELECT p.*, c.ragione_sociale 
+             FROM pratiche p 
+             LEFT JOIN clienti c ON p.cliente_id = c.id 
+             WHERE p.id = ?",
             [$praticaId]
         );
         
@@ -549,57 +713,117 @@ function reorderTasks($input, $db, $user) {
             return;
         }
         
-        if (!$user['is_admin'] && $pratica['operatore_responsabile_id'] != $user['id']) {
-            echo json_encode(['success' => false, 'message' => 'Non hai i permessi']);
-            return;
+        $tasks = $db->select("
+            SELECT 
+                t.*,
+                CONCAT(o.nome, ' ', o.cognome) as operatore_nome,
+                (SELECT SUM(durata_minuti) FROM tracking_task WHERE task_id = t.id) as minuti_totali
+            FROM task t
+            LEFT JOIN operatori o ON t.operatore_assegnato_id = o.id
+            WHERE t.pratica_id = ?
+            ORDER BY t.ordine
+        ", [$praticaId]);
+        
+        // Genera CSV
+        header('Content-Type: text/csv; charset=UTF-8');
+        header('Content-Disposition: attachment; filename="task_pratica_' . $pratica['numero_pratica'] . '.csv"');
+        
+        $output = fopen('php://output', 'w');
+        
+        // BOM per Excel
+        fprintf($output, chr(0xEF).chr(0xBB).chr(0xBF));
+        
+        // Headers
+        fputcsv($output, [
+            'ID', 'Titolo', 'Descrizione', 'Stato', 
+            'Operatore', 'Ore Stimate', 'Ore Lavorate', 
+            'Data Scadenza', 'Completato', 'Obbligatorio'
+        ], ';');
+        
+        // Dati
+        foreach ($tasks as $task) {
+            fputcsv($output, [
+                $task['id'],
+                $task['titolo'],
+                $task['descrizione'],
+                TASK_STATI[$task['stato']]['label'],
+                $task['operatore_nome'] ?? 'Non assegnato',
+                $task['ore_stimate'],
+                round(($task['minuti_totali'] ?? 0) / 60, 2),
+                $task['data_scadenza'] ? date('d/m/Y', strtotime($task['data_scadenza'])) : '',
+                $task['data_completamento'] ? date('d/m/Y', strtotime($task['data_completamento'])) : '',
+                $task['is_obbligatorio'] ? 'Sì' : 'No'
+            ], ';');
         }
         
-        $db->beginTransaction();
-        
-        // Aggiorna ordine di ogni task
-        foreach ($taskOrder as $index => $taskId) {
-            $db->update('task', [
-                'ordine' => $index,
-                'updated_at' => date('Y-m-d H:i:s')
-            ], 'id = ? AND pratica_id = ?', [$taskId, $praticaId]);
-        }
-        
-        $db->commit();
-        
-        echo json_encode([
-            'success' => true,
-            'message' => 'Ordine aggiornato'
-        ]);
+        fclose($output);
+        exit;
         
     } catch (Exception $e) {
-        $db->rollback();
-        error_log("Errore reorder tasks: " . $e->getMessage());
-        echo json_encode(['success' => false, 'message' => 'Errore durante il riordino']);
+        error_log("Errore export tasks: " . $e->getMessage());
+        echo json_encode(['success' => false, 'message' => 'Errore durante l\'export']);
+    }
+}
+
+// ============================================
+// FUNZIONI HELPER
+// ============================================
+
+/**
+ * Aggiorna progress pratica
+ */
+function updatePraticaProgress($praticaId, $db) {
+    try {
+        // Calcola statistiche
+        $stats = $db->selectOne("
+            SELECT 
+                COUNT(*) as totali,
+                COUNT(CASE WHEN stato = 'completato' THEN 1 END) as completati,
+                SUM(ore_stimate) as ore_stimate_totali,
+                SUM(CASE WHEN stato = 'completato' THEN ore_stimate ELSE 0 END) as ore_completate
+            FROM task
+            WHERE pratica_id = ?
+        ", [$praticaId]);
+        
+        $progress = 0;
+        if ($stats['totali'] > 0) {
+            $progress = round(($stats['completati'] / $stats['totali']) * 100);
+        }
+        
+        // Aggiorna pratica
+        $db->update('pratiche', [
+            'progress_percentuale' => $progress,
+            'task_totali' => $stats['totali'],
+            'task_completati' => $stats['completati'],
+            'updated_at' => date('Y-m-d H:i:s')
+        ], 'id = ?', [$praticaId]);
+        
+    } catch (Exception $e) {
+        error_log("Errore update progress: " . $e->getMessage());
     }
 }
 
 /**
- * Helper: Aggiorna progress pratica
+ * Log attività
  */
-function updatePraticaProgress($praticaId, $db) {
-    $stats = $db->selectOne("
-        SELECT 
-            COUNT(*) as totali,
-            COUNT(CASE WHEN stato = 'completato' THEN 1 END) as completati,
-            SUM(ore_stimate) as ore_stimate,
-            SUM(ore_lavorate) as ore_lavorate
-        FROM task 
-        WHERE pratica_id = ?
-    ", [$praticaId]);
-    
-    $progress = $stats['totali'] > 0 
-        ? round(($stats['completati'] / $stats['totali']) * 100) 
-        : 0;
-    
-    $db->update('pratiche', [
-        'progress_percentage' => $progress,
-        'totale_ore_stimate' => $stats['ore_stimate'] ?? 0,
-        'totale_ore_lavorate' => $stats['ore_lavorate'] ?? 0,
-        'updated_at' => date('Y-m-d H:i:s')
-    ], 'id = ?', [$praticaId]);
+function logActivity($action, $taskId, $userId, $db, $data = []) {
+    try {
+        // TODO: Implementare tabella activity_log
+        error_log("Activity: $action on task $taskId by user $userId");
+    } catch (Exception $e) {
+        error_log("Errore log activity: " . $e->getMessage());
+    }
 }
+
+/**
+ * Notifica assegnazione operatore
+ */
+function notifyOperatorAssignment($taskId, $operatoreId, $db) {
+    try {
+        // TODO: Implementare sistema notifiche
+        error_log("Notifica assegnazione task $taskId a operatore $operatoreId");
+    } catch (Exception $e) {
+        error_log("Errore notifica: " . $e->getMessage());
+    }
+}
+?>
