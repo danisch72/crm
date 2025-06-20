@@ -84,29 +84,26 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                             $updatedTaskIds[] = $taskData['id'];
                         } else {
                             // Crea nuovo task
-                            $taskId = $db->insert('task', [
+                            $db->insert('task', [
                                 'pratica_id' => $pratica['id'],
-                                'cliente_id' => $pratica['cliente_id'],
                                 'titolo' => $taskData['titolo'],
                                 'descrizione' => $taskData['descrizione'] ?? '',
-                                'data_scadenza' => date('Y-m-d', strtotime('+7 days')),
-                                'stato' => 'da_iniziare',
-                                'priorita' => 'media',
+                                'stato' => 'da_fare',
                                 'ore_stimate' => floatval($taskData['ore_stimate'] ?? 0),
                                 'ordine' => $index,
-                                'operatore_assegnato_id' => $currentUser['id']
+                                'created_at' => date('Y-m-d H:i:s')
                             ]);
                         }
                     }
                 }
                 
                 // Elimina task rimossi
-                $toDelete = array_diff($existingTaskIds, $updatedTaskIds);
-                if (!empty($toDelete)) {
-                    $placeholders = implode(',', array_fill(0, count($toDelete), '?'));
+                $taskToDelete = array_diff($existingTaskIds, $updatedTaskIds);
+                if (!empty($taskToDelete)) {
+                    $placeholders = implode(',', array_fill(0, count($taskToDelete), '?'));
                     $db->query(
-                        "DELETE FROM task WHERE id IN ($placeholders) AND pratica_id = ?",
-                        array_merge($toDelete, [$pratica['id']])
+                        "DELETE FROM task WHERE pratica_id = ? AND id IN ($placeholders)",
+                        array_merge([$pratica['id']], $taskToDelete)
                     );
                 }
             }
@@ -197,23 +194,32 @@ require_once CRM_PATH . '/components/navigation.php';
         }
         
         .form-label.required::after {
-            content: " *";
-            color: #ef4444;
+            content: ' *';
+            color: #dc2626;
         }
         
         .form-control {
             width: 100%;
-            padding: 0.625rem 0.875rem;
+            padding: 0.75rem;
             border: 1px solid #d1d5db;
             border-radius: 6px;
             font-size: 0.875rem;
-            transition: all 0.15s ease;
+            transition: all 0.2s;
         }
         
         .form-control:focus {
             outline: none;
-            border-color: #007849;
-            box-shadow: 0 0 0 3px rgba(0, 120, 73, 0.1);
+            border-color: var(--primary-green);
+            box-shadow: 0 0 0 3px rgba(0,120,73,0.1);
+        }
+        
+        .form-select {
+            appearance: none;
+            background-image: url("data:image/svg+xml;charset=UTF-8,%3csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='currentColor' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3e%3cpolyline points='6 9 12 15 18 9'%3e%3c/polyline%3e%3c/svg%3e");
+            background-repeat: no-repeat;
+            background-position: right 0.75rem center;
+            background-size: 1.5em 1.5em;
+            padding-right: 2.5rem;
         }
         
         .form-textarea {
@@ -221,54 +227,81 @@ require_once CRM_PATH . '/components/navigation.php';
             resize: vertical;
         }
         
-        /* Task section */
+        /* Task management */
         .tasks-section {
             margin-top: 2rem;
-            padding-top: 2rem;
-            border-top: 1px solid #e5e7eb;
+        }
+        
+        .task-list {
+            border: 1px solid #e5e7eb;
+            border-radius: 6px;
+            overflow: hidden;
         }
         
         .task-item {
-            background: #f9fafb;
-            border: 1px solid #e5e7eb;
-            border-radius: 8px;
             padding: 1rem;
-            margin-bottom: 1rem;
+            border-bottom: 1px solid #f3f4f6;
+            background: white;
             position: relative;
         }
         
+        .task-item:last-child {
+            border-bottom: none;
+        }
+        
+        .task-item:hover {
+            background: #f9fafb;
+        }
+        
         .task-header {
-            display: grid;
-            grid-template-columns: auto 1fr auto auto;
-            gap: 1rem;
-            align-items: center;
-            margin-bottom: 0.5rem;
+            display: flex;
+            gap: 0.75rem;
+            align-items: flex-start;
+        }
+        
+        .task-handle {
+            cursor: move;
+            color: #9ca3af;
+            padding: 0.25rem;
         }
         
         .task-number {
-            background: #007849;
-            color: white;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
             width: 24px;
             height: 24px;
             border-radius: 50%;
-            display: flex;
-            align-items: center;
-            justify-content: center;
+            background: #e5e7eb;
             font-size: 0.75rem;
             font-weight: 600;
+            color: #374151;
         }
         
-        .task-title-input {
+        .task-content {
             flex: 1;
+            display: grid;
+            grid-template-columns: 1fr auto;
+            gap: 1rem;
         }
         
-        .task-ore {
-            width: 80px;
+        .task-fields {
+            display: grid;
+            gap: 0.5rem;
+        }
+        
+        .task-input {
+            width: 100%;
+            padding: 0.5rem 0.75rem;
+            border: 1px solid #e5e7eb;
+            border-radius: 4px;
+            font-size: 0.875rem;
         }
         
         .task-actions {
             display: flex;
             gap: 0.5rem;
+            align-items: flex-start;
         }
         
         .btn-icon {
@@ -348,143 +381,154 @@ require_once CRM_PATH . '/components/navigation.php';
         <?php include CRM_PATH . '/components/navigation.php'; ?>
         
         <div class="main-wrapper">
-            <?php include CRM_PATH . '/components/header.php'; ?>
+            <?php include CRM_PATH . '/components/sidebar.php'; ?>
             
             <main class="main-content">
                 <div class="edit-container">
-                    <!-- Header -->
                     <div class="form-header">
                         <h1>✏️ Modifica Pratica</h1>
                     </div>
                     
                     <?php if (!empty($errors)): ?>
-                        <div class="alert alert-error">
-                            <strong>Errori nel form:</strong>
-                            <ul style="margin: 0.5rem 0 0 1.5rem;">
-                                <?php foreach ($errors as $error): ?>
-                                    <li><?= htmlspecialchars($error) ?></li>
-                                <?php endforeach; ?>
-                            </ul>
-                        </div>
+                    <div class="alert alert-error">
+                        <ul style="margin: 0; padding-left: 1.5rem;">
+                            <?php foreach ($errors as $error): ?>
+                            <li><?= htmlspecialchars($error) ?></li>
+                            <?php endforeach; ?>
+                        </ul>
+                    </div>
                     <?php endif; ?>
                     
-                    <!-- Form -->
                     <form method="POST" class="form-card">
-                        <!-- Informazioni Base -->
+                        <!-- Sezione Info Base -->
                         <div class="form-section">
-                            <h2 class="form-section-title">📋 Informazioni Pratica</h2>
+                            <h2 class="form-section-title">Informazioni Principali</h2>
+                            
+                            <div class="form-group">
+                                <label class="form-label required">Titolo Pratica</label>
+                                <input type="text" 
+                                       name="titolo" 
+                                       class="form-control" 
+                                       value="<?= htmlspecialchars($pratica['titolo']) ?>"
+                                       required>
+                            </div>
+                            
+                            <div class="form-group">
+                                <label class="form-label">Descrizione</label>
+                                <textarea name="descrizione" 
+                                          class="form-control form-textarea"><?= htmlspecialchars($pratica['descrizione'] ?? '') ?></textarea>
+                            </div>
                             
                             <div class="form-grid">
-                                <div class="form-group" style="grid-column: 1 / -1;">
-                                    <label class="form-label required">Titolo pratica</label>
-                                    <input type="text" 
-                                           name="titolo" 
-                                           class="form-control" 
-                                           value="<?= htmlspecialchars($pratica['titolo']) ?>"
-                                           required>
-                                </div>
-                                
-                                <div class="form-group" style="grid-column: 1 / -1;">
-                                    <label class="form-label">Descrizione</label>
-                                    <textarea name="descrizione" 
-                                              class="form-control form-textarea"><?= htmlspecialchars($pratica['descrizione']) ?></textarea>
+                                <div class="form-group">
+                                    <label class="form-label required">Stato</label>
+                                    <select name="stato" class="form-control form-select" required>
+                                        <?php foreach (PRATICHE_STATI as $key => $stato): ?>
+                                        <option value="<?= $key ?>" <?= $pratica['stato'] === $key ? 'selected' : '' ?>>
+                                            <?= $stato['icon'] ?> <?= $stato['label'] ?>
+                                        </option>
+                                        <?php endforeach; ?>
+                                    </select>
                                 </div>
                                 
                                 <div class="form-group">
                                     <label class="form-label required">Priorità</label>
-                                    <select name="priorita" class="form-control" required>
-                                        <?php foreach (PRATICHE_PRIORITA as $key => $config): ?>
-                                            <option value="<?= $key ?>" 
-                                                    <?= $pratica['priorita'] === $key ? 'selected' : '' ?>>
-                                                <?= $config['label'] ?>
-                                            </option>
+                                    <select name="priorita" class="form-control form-select" required>
+                                        <?php foreach (PRATICHE_PRIORITA as $key => $priorita): ?>
+                                        <option value="<?= $key ?>" <?= $pratica['priorita'] === $key ? 'selected' : '' ?>>
+                                            <?= $priorita['icon'] ?> <?= $priorita['label'] ?>
+                                        </option>
                                         <?php endforeach; ?>
                                     </select>
                                 </div>
-                                
+                            </div>
+                            
+                            <div class="form-grid">
                                 <div class="form-group">
-                                    <label class="form-label required">Stato</label>
-                                    <select name="stato" class="form-control" required>
-                                        <?php foreach (PRATICHE_STATI as $key => $config): ?>
-                                            <option value="<?= $key ?>" 
-                                                    <?= $pratica['stato'] === $key ? 'selected' : '' ?>>
-                                                <?= $config['icon'] ?> <?= $config['label'] ?>
-                                            </option>
-                                        <?php endforeach; ?>
-                                    </select>
-                                </div>
-                                
-                                <div class="form-group">
-                                    <label class="form-label required">Data scadenza</label>
+                                    <label class="form-label required">Data Scadenza</label>
                                     <input type="date" 
                                            name="data_scadenza" 
-                                           class="form-control" 
+                                           class="form-control"
                                            value="<?= $pratica['data_scadenza'] ?>"
                                            required>
                                 </div>
                                 
                                 <div class="form-group">
-                                    <label class="form-label">Ore stimate</label>
+                                    <label class="form-label">Ore Stimate</label>
                                     <input type="number" 
                                            name="ore_stimate" 
-                                           class="form-control" 
+                                           class="form-control"
                                            value="<?= $pratica['ore_stimate'] ?>"
-                                           step="0.5"
-                                           min="0">
+                                           min="0"
+                                           step="0.5">
                                 </div>
                             </div>
                         </div>
                         
-                        <!-- Task -->
-                        <div class="tasks-section">
-                            <h2 class="form-section-title">📋 Task della Pratica</h2>
-                            
-                            <div id="task-list">
-                                <?php foreach ($tasks as $index => $task): ?>
-                                    <div class="task-item" data-index="<?= $index ?>">
-                                        <input type="hidden" name="tasks[<?= $index ?>][id]" value="<?= $task['id'] ?>">
-                                        <div class="task-header">
-                                            <span class="task-number"><?= $index + 1 ?></span>
-                                            <input type="text" 
-                                                   name="tasks[<?= $index ?>][titolo]" 
-                                                   class="form-control task-title-input" 
-                                                   placeholder="Titolo del task"
-                                                   value="<?= htmlspecialchars($task['titolo']) ?>"
-                                                   required>
-                                            <input type="number" 
-                                                   name="tasks[<?= $index ?>][ore_stimate]" 
-                                                   class="form-control task-ore" 
-                                                   placeholder="Ore"
-                                                   value="<?= $task['ore_stimate'] ?>"
-                                                   step="0.5"
-                                                   min="0">
-                                            <div class="task-actions">
-                                                <button type="button" class="btn-icon" onclick="removeTask(<?= $index ?>)" title="Rimuovi">
-                                                    🗑️
-                                                </button>
-                                            </div>
-                                        </div>
-                                        <textarea name="tasks[<?= $index ?>][descrizione]" 
-                                                  class="form-control form-textarea" 
-                                                  placeholder="Descrizione (opzionale)"
-                                                  style="margin-top: 0.5rem; min-height: 60px;"><?= htmlspecialchars($task['descrizione']) ?></textarea>
-                                    </div>
-                                <?php endforeach; ?>
+                        <!-- Sezione Task -->
+                        <div class="form-section tasks-section">
+                            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1rem;">
+                                <h2 class="form-section-title" style="margin: 0;">Task della Pratica</h2>
+                                <button type="button" class="btn btn-secondary" onclick="addTask()">
+                                    ➕ Aggiungi Task
+                                </button>
                             </div>
                             
-                            <button type="button" class="btn btn-secondary" onclick="addTask()">
-                                ➕ Aggiungi Task
-                            </button>
+                            <div class="task-list" id="taskList">
+                                <?php foreach ($tasks as $index => $task): ?>
+                                <div class="task-item" data-task-id="<?= $task['id'] ?>">
+                                    <div class="task-header">
+                                        <span class="task-handle">⋮⋮</span>
+                                        <span class="task-number"><?= $index + 1 ?></span>
+                                        
+                                        <div class="task-content">
+                                            <div class="task-fields">
+                                                <input type="hidden" name="tasks[<?= $index ?>][id]" value="<?= $task['id'] ?>">
+                                                
+                                                <input type="text" 
+                                                       name="tasks[<?= $index ?>][titolo]" 
+                                                       class="task-input"
+                                                       placeholder="Titolo task..."
+                                                       value="<?= htmlspecialchars($task['titolo']) ?>"
+                                                       required>
+                                                
+                                                <textarea name="tasks[<?= $index ?>][descrizione]" 
+                                                          class="task-input"
+                                                          placeholder="Descrizione task..."
+                                                          rows="2"><?= htmlspecialchars($task['descrizione'] ?? '') ?></textarea>
+                                            </div>
+                                            
+                                            <div style="display: flex; align-items: flex-start; gap: 0.5rem;">
+                                                <input type="number" 
+                                                       name="tasks[<?= $index ?>][ore_stimate]" 
+                                                       class="task-input"
+                                                       placeholder="Ore"
+                                                       value="<?= $task['ore_stimate'] ?>"
+                                                       min="0"
+                                                       step="0.5"
+                                                       style="width: 80px;">
+                                                
+                                                <div class="task-actions">
+                                                    <button type="button" class="btn-icon" onclick="removeTask(this)" title="Rimuovi task">
+                                                        🗑️
+                                                    </button>
+                                                </div>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+                                <?php endforeach; ?>
+                            </div>
                         </div>
                         
                         <!-- Actions -->
                         <div class="form-actions">
+                            <a href="/crm/?action=pratiche&view=view&id=<?= $pratica['id'] ?>" class="btn btn-secondary">
+                                ✖ Annulla
+                            </a>
                             <button type="submit" class="btn btn-primary">
                                 💾 Salva Modifiche
                             </button>
-                            <a href="/crm/?action=pratiche&view=view&id=<?= $pratica['id'] ?>" class="btn btn-secondary">
-                                ❌ Annulla
-                            </a>
                         </div>
                     </form>
                 </div>
@@ -493,54 +537,66 @@ require_once CRM_PATH . '/components/navigation.php';
     </div>
     
     <script>
-        // Gestione task dinamici
         let taskIndex = <?= count($tasks) ?>;
         
         function addTask() {
-            const taskList = document.getElementById('task-list');
+            const taskList = document.getElementById('taskList');
             const newTask = document.createElement('div');
             newTask.className = 'task-item';
-            newTask.dataset.index = taskIndex;
-            
             newTask.innerHTML = `
-                <input type="hidden" name="tasks[${taskIndex}][id]" value="0">
                 <div class="task-header">
-                    <span class="task-number">${taskIndex + 1}</span>
-                    <input type="text" 
-                           name="tasks[${taskIndex}][titolo]" 
-                           class="form-control task-title-input" 
-                           placeholder="Titolo del task"
-                           required>
-                    <input type="number" 
-                           name="tasks[${taskIndex}][ore_stimate]" 
-                           class="form-control task-ore" 
-                           placeholder="Ore"
-                           value="1"
-                           step="0.5"
-                           min="0">
-                    <div class="task-actions">
-                        <button type="button" class="btn-icon" onclick="removeTask(${taskIndex})" title="Rimuovi">
-                            🗑️
-                        </button>
+                    <span class="task-handle">⋮⋮</span>
+                    <span class="task-number">${taskList.children.length + 1}</span>
+                    
+                    <div class="task-content">
+                        <div class="task-fields">
+                            <input type="hidden" name="tasks[${taskIndex}][id]" value="">
+                            
+                            <input type="text" 
+                                   name="tasks[${taskIndex}][titolo]" 
+                                   class="task-input"
+                                   placeholder="Titolo task..."
+                                   required>
+                            
+                            <textarea name="tasks[${taskIndex}][descrizione]" 
+                                      class="task-input"
+                                      placeholder="Descrizione task..."
+                                      rows="2"></textarea>
+                        </div>
+                        
+                        <div style="display: flex; align-items: flex-start; gap: 0.5rem;">
+                            <input type="number" 
+                                   name="tasks[${taskIndex}][ore_stimate]" 
+                                   class="task-input"
+                                   placeholder="Ore"
+                                   min="0"
+                                   step="0.5"
+                                   style="width: 80px;">
+                            
+                            <div class="task-actions">
+                                <button type="button" class="btn-icon" onclick="removeTask(this)" title="Rimuovi task">
+                                    🗑️
+                                </button>
+                            </div>
+                        </div>
                     </div>
                 </div>
-                <textarea name="tasks[${taskIndex}][descrizione]" 
-                          class="form-control form-textarea" 
-                          placeholder="Descrizione (opzionale)"
-                          style="margin-top: 0.5rem; min-height: 60px;"></textarea>
             `;
             
             taskList.appendChild(newTask);
             taskIndex++;
+            
+            // Focus sul nuovo campo
+            newTask.querySelector('input[type="text"]').focus();
+            
+            // Rinumera task
             updateTaskNumbers();
         }
         
-        function removeTask(index) {
-            const taskItem = document.querySelector(`[data-index="${index}"]`);
-            if (taskItem && document.querySelectorAll('.task-item').length > 1) {
-                taskItem.remove();
-                updateTaskNumbers();
-            }
+        function removeTask(button) {
+            const taskItem = button.closest('.task-item');
+            taskItem.remove();
+            updateTaskNumbers();
         }
         
         function updateTaskNumbers() {
@@ -548,6 +604,35 @@ require_once CRM_PATH . '/components/navigation.php';
                 item.querySelector('.task-number').textContent = index + 1;
             });
         }
+        
+        // Drag & Drop (base)
+        document.addEventListener('DOMContentLoaded', function() {
+            const taskList = document.getElementById('taskList');
+            let draggedElement = null;
+            
+            taskList.addEventListener('dragstart', function(e) {
+                if (e.target.classList.contains('task-handle')) {
+                    draggedElement = e.target.closest('.task-item');
+                    draggedElement.style.opacity = '0.5';
+                }
+            });
+            
+            taskList.addEventListener('dragend', function(e) {
+                if (draggedElement) {
+                    draggedElement.style.opacity = '';
+                    draggedElement = null;
+                }
+            });
+            
+            taskList.addEventListener('dragover', function(e) {
+                e.preventDefault();
+            });
+            
+            taskList.addEventListener('drop', function(e) {
+                e.preventDefault();
+                // Implementare logica riordino
+            });
+        });
     </script>
 </body>
 </html>

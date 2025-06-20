@@ -1,8 +1,8 @@
 <?php
 /**
- * components/navigation.php - Sidebar Professionale CRM Re.De Consulting
+ * components/sidebar.php - Sidebar Laterale CRM Re.De Consulting
  * 
- * ✅ VERSIONE PROFESSIONALE CON UX OTTIMIZZATA
+ * ✅ SIDEBAR PROFESSIONALE FISSA A SINISTRA
  * 
  * Features:
  * - Colori professionali ad alto contrasto

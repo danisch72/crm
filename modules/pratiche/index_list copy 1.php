@@ -129,10 +129,11 @@ if ($currentUser['is_admin']) {
     ");
 }
 
-// Imposta variabili per header
-$pageTitle = 'Gestione Pratiche';
-$pageIcon = '📋';
+// Include header
+require_once $_SERVER['DOCUMENT_ROOT'] . '/crm/components/header.php';
+require_once $_SERVER['DOCUMENT_ROOT'] . '/crm/components/navigation.php';
 ?>
+
 <!DOCTYPE html>
 <html lang="it">
 <head>
@@ -141,19 +142,411 @@ $pageIcon = '📋';
     <title>Gestione Pratiche - CRM Re.De Consulting</title>
     <link rel="stylesheet" href="/crm/assets/css/design-system.css">
     <link rel="stylesheet" href="/crm/assets/css/datev-optimal.css">
+    <style>
+        /* Container principale */
+        .pratiche-container {
+            padding: 1.5rem;
+            max-width: 1600px;
+            margin: 0 auto;
+        }
+        
+        /* Header con statistiche */
+        .pratiche-header {
+            background: white;
+            border-radius: 8px;
+            padding: 1.5rem;
+            margin-bottom: 1.5rem;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.05);
+        }
+        
+        .header-top {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 1rem;
+        }
+        
+        .page-title {
+            font-size: 1.5rem;
+            font-weight: 600;
+            color: #1f2937;
+            margin: 0;
+        }
+        
+        .header-actions {
+            display: flex;
+            gap: 0.5rem;
+        }
+        
+        /* Statistiche */
+        .stats-row {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+            gap: 1rem;
+        }
+        
+        .stat-card {
+            background: #f9fafb;
+            padding: 1rem;
+            border-radius: 6px;
+            text-align: center;
+        }
+        
+        .stat-value {
+            font-size: 1.5rem;
+            font-weight: 600;
+            color: #007849;
+            display: block;
+        }
+        
+        .stat-label {
+            font-size: 0.75rem;
+            color: #6b7280;
+            margin-top: 0.25rem;
+        }
+        
+        .stat-card.danger .stat-value { color: #dc2626; }
+        .stat-card.warning .stat-value { color: #f59e0b; }
+        
+        /* Filtri */
+        .filters-bar {
+            background: white;
+            border-radius: 8px;
+            padding: 1rem;
+            margin-bottom: 1rem;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.05);
+        }
+        
+        .filters-form {
+            display: flex;
+            gap: 0.75rem;
+            align-items: center;
+            flex-wrap: wrap;
+        }
+        
+        .filter-group {
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+        }
+        
+        .filter-input {
+            padding: 0.5rem 0.75rem;
+            border: 1px solid #d1d5db;
+            border-radius: 4px;
+            font-size: 0.8125rem;
+        }
+        
+        .filter-select {
+            appearance: none;
+            background-image: url("data:image/svg+xml;charset=UTF-8,%3csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='currentColor' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3e%3cpolyline points='6 9 12 15 18 9'%3e%3c/polyline%3e%3c/svg%3e");
+            background-repeat: no-repeat;
+            background-position: right 0.5rem center;
+            background-size: 1em 1em;
+            padding-right: 2rem;
+        }
+        
+        /* Vista Lista */
+        .pratiche-list {
+            background: white;
+            border-radius: 8px;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.05);
+            overflow: hidden;
+        }
+        
+        .list-header {
+            display: grid;
+            grid-template-columns: 3fr 2fr 1fr 1fr 1fr 120px;
+            padding: 0.75rem 1rem;
+            background: #f9fafb;
+            font-size: 0.75rem;
+            font-weight: 600;
+            color: #6b7280;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+        }
+        
+        .list-item {
+            display: grid;
+            grid-template-columns: 3fr 2fr 1fr 1fr 1fr 120px;
+            padding: 1rem;
+            border-bottom: 1px solid #e5e7eb;
+            align-items: center;
+            transition: background 0.15s;
+        }
+        
+        .list-item:hover {
+            background: #f9fafb;
+        }
+        
+        .pratica-info {
+            display: flex;
+            align-items: center;
+            gap: 0.75rem;
+        }
+        
+        .tipo-icon {
+            width: 32px;
+            height: 32px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            border-radius: 6px;
+            font-size: 1.25rem;
+        }
+        
+        .pratica-details {
+            flex: 1;
+            min-width: 0;
+        }
+        
+        .pratica-title {
+            font-weight: 500;
+            color: #1f2937;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            font-size: 0.875rem;
+        }
+        
+        .pratica-meta {
+            font-size: 0.75rem;
+            color: #6b7280;
+            margin-top: 0.125rem;
+        }
+        
+        /* Vista Kanban */
+        .kanban-board {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+            gap: 1rem;
+            align-items: flex-start;
+        }
+        
+        .kanban-column {
+            background: #f9fafb;
+            border-radius: 8px;
+            padding: 0.75rem;
+            min-height: 400px;
+        }
+        
+        .kanban-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 0.75rem;
+            padding: 0.5rem;
+        }
+        
+        .kanban-title {
+            font-weight: 600;
+            font-size: 0.875rem;
+            color: #374151;
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+        }
+        
+        .kanban-count {
+            background: white;
+            padding: 0.125rem 0.5rem;
+            border-radius: 12px;
+            font-size: 0.75rem;
+            font-weight: 500;
+            color: #6b7280;
+        }
+        
+        .kanban-cards {
+            display: flex;
+            flex-direction: column;
+            gap: 0.5rem;
+        }
+        
+        .pratica-card {
+            background: white;
+            border: 1px solid #e5e7eb;
+            border-radius: 6px;
+            padding: 0.75rem;
+            cursor: move;
+            transition: all 0.2s;
+        }
+        
+        .pratica-card:hover {
+            box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+            transform: translateY(-1px);
+        }
+        
+        .pratica-card.dragging {
+            opacity: 0.5;
+            transform: rotate(2deg);
+        }
+        
+        .card-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: flex-start;
+            margin-bottom: 0.5rem;
+        }
+        
+        .card-tipo {
+            font-size: 1.25rem;
+        }
+        
+        .card-priorita {
+            font-size: 0.75rem;
+            padding: 0.125rem 0.375rem;
+            border-radius: 4px;
+            font-weight: 500;
+        }
+        
+        .priorita-urgente { background: #fee2e2; color: #dc2626; }
+        .priorita-alta { background: #fed7aa; color: #ea580c; }
+        .priorita-media { background: #fef3c7; color: #d97706; }
+        .priorita-bassa { background: #d1fae5; color: #059669; }
+        
+        .card-title {
+            font-weight: 500;
+            font-size: 0.8125rem;
+            color: #1f2937;
+            margin-bottom: 0.25rem;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+        
+        .card-cliente {
+            font-size: 0.75rem;
+            color: #6b7280;
+            margin-bottom: 0.5rem;
+        }
+        
+        .card-meta {
+            display: flex;
+            gap: 0.75rem;
+            font-size: 0.75rem;
+            color: #6b7280;
+        }
+        
+        .card-progress {
+            margin-top: 0.5rem;
+            background: #e5e7eb;
+            height: 4px;
+            border-radius: 2px;
+            overflow: hidden;
+        }
+        
+        .progress-bar {
+            height: 100%;
+            background: #10b981;
+            transition: width 0.3s;
+        }
+        
+        /* Badge stati */
+        .badge {
+            display: inline-block;
+            padding: 0.125rem 0.5rem;
+            font-size: 0.6875rem;
+            font-weight: 500;
+            border-radius: 12px;
+        }
+        
+        .stato-bozza { background: #f3f4f6; color: #6b7280; }
+        .stato-da_iniziare { background: #fef3c7; color: #92400e; }
+        .stato-in_corso { background: #dbeafe; color: #1e40af; }
+        .stato-in_attesa { background: #e9d5ff; color: #6b21a8; }
+        .stato-in_revisione { background: #fce7f3; color: #be185d; }
+        .stato-completata { background: #d1fae5; color: #065f46; }
+        .stato-fatturata { background: #cffafe; color: #155e75; }
+        .stato-archiviata { background: #e5e7eb; color: #374151; }
+        
+        /* Empty state */
+        .empty-state {
+            text-align: center;
+            padding: 3rem;
+            color: #6b7280;
+        }
+        
+        .empty-state-icon {
+            font-size: 3rem;
+            margin-bottom: 1rem;
+            opacity: 0.3;
+        }
+        
+        .empty-state-title {
+            font-size: 1.125rem;
+            font-weight: 600;
+            color: #374151;
+            margin-bottom: 0.5rem;
+        }
+        
+        .empty-state-text {
+            font-size: 0.875rem;
+            margin-bottom: 1.5rem;
+        }
+        
+        /* Buttons */
+        .btn {
+            padding: 0.5rem 1rem;
+            border: none;
+            border-radius: 6px;
+            font-size: 0.875rem;
+            font-weight: 500;
+            cursor: pointer;
+            transition: all 0.15s;
+            text-decoration: none;
+            display: inline-flex;
+            align-items: center;
+            gap: 0.5rem;
+        }
+        
+        .btn-sm {
+            padding: 0.375rem 0.75rem;
+            font-size: 0.8125rem;
+        }
+        
+        .btn-primary {
+            background: #007849;
+            color: white;
+        }
+        
+        .btn-primary:hover {
+            background: #005a37;
+            transform: translateY(-1px);
+            box-shadow: 0 4px 12px rgba(0,120,73,0.2);
+        }
+        
+        .btn-secondary {
+            background: #e5e7eb;
+            color: #374151;
+        }
+        
+        .btn-secondary:hover {
+            background: #d1d5db;
+        }
+        
+        .btn-icon {
+            padding: 0.375rem;
+            background: transparent;
+            border: none;
+            color: #6b7280;
+            cursor: pointer;
+            font-size: 1rem;
+            border-radius: 4px;
+            transition: all 0.15s;
+        }
+        
+        .btn-icon:hover {
+            background: #f3f4f6;
+            color: #374151;
+        }
+    </style>
 </head>
 <body>
-    <div class="app-layout">
-        <?php 
-        // SIDEBAR (barra laterale sinistra)
-        include $_SERVER['DOCUMENT_ROOT'] . '/crm/components/sidebar.php'; 
-        ?>
+    <div class="app-container">
+        <?php include $_SERVER['DOCUMENT_ROOT'] . '/crm/components/navigation.php'; ?>
         
-        <div class="content-wrapper">
-            <?php 
-            // HEADER (barra orizzontale in alto)
-            include $_SERVER['DOCUMENT_ROOT'] . '/crm/components/header.php'; 
-            ?>
+        <div class="main-wrapper">
+            <?php include $_SERVER['DOCUMENT_ROOT'] . '/crm/components/sidebar.php'; ?>
             
             <main class="main-content">
                 <div class="pratiche-container">

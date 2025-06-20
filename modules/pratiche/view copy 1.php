@@ -66,9 +66,9 @@ $activities = $db->select("
     LIMIT 10
 ", [$pratica['id']]);
 
-// Imposta variabili per header
-$pageTitle = $pratica_completa['titolo'];
-$pageIcon = PRATICHE_TYPES[$pratica_completa['tipo_pratica']]['icon'] ?? '📋';
+// Include header
+require_once $_SERVER['DOCUMENT_ROOT'] . '/crm/components/header.php';
+require_once $_SERVER['DOCUMENT_ROOT'] . '/crm/components/navigation.php';
 ?>
 <!DOCTYPE html>
 <html lang="it">
@@ -81,16 +81,10 @@ $pageIcon = PRATICHE_TYPES[$pratica_completa['tipo_pratica']]['icon'] ?? '📋';
 </head>
 <body>
     <div class="app-layout">
-        <?php 
-        // Include sidebar (barra laterale sinistra)
-        include $_SERVER['DOCUMENT_ROOT'] . '/crm/components/sidebar.php'; 
-        ?>
+        <?php include $_SERVER['DOCUMENT_ROOT'] . '/crm/components/navigation.php'; ?>
         
         <div class="content-wrapper">
-            <?php 
-            // Include header (barra orizzontale in alto)
-            include $_SERVER['DOCUMENT_ROOT'] . '/crm/components/header.php'; 
-            ?>
+            <?php include $_SERVER['DOCUMENT_ROOT'] . '/crm/components/sidebar.php'; ?>
             
             <main class="main-content">
                 <div class="container">

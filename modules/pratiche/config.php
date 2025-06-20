@@ -72,24 +72,24 @@ define('PRATICHE_TYPES', [
     'contrattualistica' => [
         'label' => 'Contrattualistica',
         'icon' => '📄',
-        'color' => '#06B6D4',
+        'color' => '#EF4444',
         'ore_default' => 6
     ],
     'consulenza_fiscale' => [
         'label' => 'Consulenza Fiscale',
         'icon' => '💼',
-        'color' => '#84CC16',
+        'color' => '#7C3AED',
         'ore_default' => 3
     ],
     'consulenza_lavoro' => [
-        'label' => 'Consulenza del Lavoro',
+        'label' => 'Consulenza Lavoro',
         'icon' => '👥',
-        'color' => '#A855F7',
+        'color' => '#06B6D4',
         'ore_default' => 4
     ],
     'altra' => [
-        'label' => 'Altra',
-        'icon' => '📌',
+        'label' => 'Altra Pratica',
+        'icon' => '📎',
         'color' => '#6B7280',
         'ore_default' => 5
     ]
@@ -107,17 +107,31 @@ define('PRATICHE_STATI', [
         'can_edit' => true,
         'can_delete' => true
     ],
-    'attiva' => [
-        'label' => 'Attiva',
-        'icon' => '🟢',
-        'color' => '#3B82F6',
+    'da_iniziare' => [
+        'label' => 'Da Iniziare',
+        'icon' => '⏸️',
+        'color' => '#F59E0B',
         'can_edit' => true,
-        'can_delete' => false
+        'can_delete' => true
     ],
     'in_corso' => [
         'label' => 'In Corso',
         'icon' => '🔄',
-        'color' => '#F59E0B',
+        'color' => '#3B82F6',
+        'can_edit' => true,
+        'can_delete' => false
+    ],
+    'in_attesa' => [
+        'label' => 'In Attesa Cliente',
+        'icon' => '⏳',
+        'color' => '#8B5CF6',
+        'can_edit' => true,
+        'can_delete' => false
+    ],
+    'in_revisione' => [
+        'label' => 'In Revisione',
+        'icon' => '🔍',
+        'color' => '#EC4899',
         'can_edit' => true,
         'can_delete' => false
     ],
@@ -131,21 +145,14 @@ define('PRATICHE_STATI', [
     'fatturata' => [
         'label' => 'Fatturata',
         'icon' => '💰',
-        'color' => '#8B5CF6',
+        'color' => '#059669',
         'can_edit' => false,
-        'can_delete' => false
-    ],
-    'sospesa' => [
-        'label' => 'Sospesa',
-        'icon' => '⏸️',
-        'color' => '#EF4444',
-        'can_edit' => true,
         'can_delete' => false
     ],
     'archiviata' => [
         'label' => 'Archiviata',
-        'icon' => '🗄️',
-        'color' => '#6B7280',
+        'icon' => '📁',
+        'color' => '#374151',
         'can_edit' => false,
         'can_delete' => false
     ]
@@ -158,28 +165,27 @@ define('PRATICHE_STATI', [
 define('TASK_STATI', [
     'da_fare' => [
         'label' => 'Da Fare',
-        'icon' => '⏳',
-        'color' => '#6B7280',
-        'can_start' => true
+        'icon' => '⏸️',
+        'color' => '#F59E0B',
+        'progress' => 0
     ],
     'in_corso' => [
         'label' => 'In Corso',
         'icon' => '🔄',
-        'color' => '#F59E0B',
-        'can_pause' => true,
-        'can_complete' => true
+        'color' => '#3B82F6',
+        'progress' => 50
     ],
     'completato' => [
         'label' => 'Completato',
         'icon' => '✅',
         'color' => '#10B981',
-        'is_final' => true
+        'progress' => 100
     ],
     'bloccato' => [
         'label' => 'Bloccato',
         'icon' => '🚫',
-        'color' => '#EF4444',
-        'can_unblock' => true
+        'color' => '#DC2626',
+        'progress' => 0
     ]
 ]);
 
@@ -190,23 +196,27 @@ define('TASK_STATI', [
 define('PRATICHE_PRIORITA', [
     'bassa' => [
         'label' => 'Bassa',
-        'color' => '#6B7280',
+        'icon' => '🟢',
+        'color' => '#10B981',
         'giorni_extra' => 7
     ],
     'media' => [
         'label' => 'Media',
-        'color' => '#3B82F6',
-        'giorni_extra' => 3
+        'icon' => '🟡',
+        'color' => '#F59E0B',
+        'giorni_extra' => 0
     ],
     'alta' => [
         'label' => 'Alta',
-        'color' => '#F59E0B',
-        'giorni_extra' => 1
+        'icon' => '🟠',
+        'color' => '#F97316',
+        'giorni_extra' => -3
     ],
     'urgente' => [
         'label' => 'Urgente',
-        'color' => '#EF4444',
-        'giorni_extra' => 0
+        'icon' => '🔴',
+        'color' => '#DC2626',
+        'giorni_extra' => -7
     ]
 ]);
 
@@ -216,13 +226,16 @@ define('PRATICHE_PRIORITA', [
 
 define('PRATICHE_UI_CONFIG', [
     'items_per_page' => 20,
-    'kanban_columns' => ['bozza', 'attiva', 'in_corso', 'completata'],
+    'max_recent_items' => 5,
     'default_view' => 'kanban', // 'list' o 'kanban'
+    'enable_drag_drop' => true,
     'show_archived' => false,
+    'auto_archive_days' => 30,
     'date_format' => 'd/m/Y',
-    'time_format' => 'H:i',
+    'datetime_format' => 'd/m/Y H:i',
     'currency' => '€',
-    'tracking_precision' => 60, // secondi
+    'decimal_separator' => ',',
+    'thousands_separator' => '.'
 ]);
 
 // ============================================
@@ -230,7 +243,14 @@ define('PRATICHE_UI_CONFIG', [
 // ============================================
 
 define('PRATICHE_BUSINESS_RULES', [
-    // Tariffe orarie default per tipo pratica
+    // Validazioni
+    'min_titolo_length' => 5,
+    'max_titolo_length' => 255,
+    'max_descrizione_length' => 5000,
+    'max_ore_giornaliere' => 12,
+    'max_ore_pratica' => 999,
+    
+    // Tariffe orarie
     'tariffe_orarie' => [
         'base' => 75.00,
         'qualificata' => 95.00,
@@ -333,6 +353,102 @@ function calcolaScadenza($dataInizio, $giorniBase, $priorita = 'media') {
     $scadenza->add(new DateInterval("P{$giorniTotali}D"));
     
     return $scadenza->format('Y-m-d');
+}
+
+/**
+ * Genera numero pratica progressivo
+ */
+function generateNumeroPratica($anno = null) {
+    global $db;
+    
+    if (!$anno) {
+        $anno = date('Y');
+    }
+    
+    // Ottieni ultimo numero per l'anno
+    $result = $db->selectOne(
+        "SELECT MAX(CAST(SUBSTRING_INDEX(numero_pratica, '/', -1) AS UNSIGNED)) as ultimo 
+         FROM pratiche 
+         WHERE YEAR(created_at) = ?",
+        [$anno]
+    );
+    
+    $prossimo = ($result['ultimo'] ?? 0) + 1;
+    return sprintf("PR%d/%04d", $anno, $prossimo);
+}
+
+/**
+ * Ottieni pratica con tutti i dati correlati
+ */
+function getPraticaCompleta($praticaId) {
+    global $db;
+    
+    $pratica = $db->selectOne("
+        SELECT 
+            p.*,
+            c.ragione_sociale as cliente_nome,
+            c.email as cliente_email,
+            c.telefono as cliente_telefono,
+            CONCAT(o.nome, ' ', o.cognome) as operatore_nome,
+            COUNT(DISTINCT t.id) as totale_task,
+            COUNT(DISTINCT CASE WHEN t.stato = 'completato' THEN t.id END) as task_completati,
+            COALESCE(SUM(t.ore_lavorate), 0) as ore_totali_lavorate
+        FROM pratiche p
+        LEFT JOIN clienti c ON p.cliente_id = c.id
+        LEFT JOIN operatori o ON p.operatore_assegnato_id = o.id
+        LEFT JOIN task t ON p.id = t.pratica_id
+        WHERE p.id = ?
+        GROUP BY p.id
+    ", [$praticaId]);
+    
+    return $pratica;
+}
+
+/**
+ * Ottieni informazioni scadenza
+ */
+function getScadenzaInfo($dataScadenza) {
+    $oggi = new DateTime();
+    $scadenza = new DateTime($dataScadenza);
+    $diff = $oggi->diff($scadenza);
+    $giorni = (int)$diff->format('%R%a');
+    
+    if ($giorni < 0) {
+        return [
+            'text' => abs($giorni) . ' giorni fa',
+            'class' => 'text-danger',
+            'icon' => '🔴',
+            'is_scaduta' => true
+        ];
+    } elseif ($giorni == 0) {
+        return [
+            'text' => 'Oggi',
+            'class' => 'text-warning',
+            'icon' => '🟡',
+            'is_scaduta' => false
+        ];
+    } elseif ($giorni <= 3) {
+        return [
+            'text' => 'tra ' . $giorni . ' giorni',
+            'class' => 'text-warning',
+            'icon' => '🟠',
+            'is_scaduta' => false
+        ];
+    } elseif ($giorni <= 7) {
+        return [
+            'text' => 'tra ' . $giorni . ' giorni',
+            'class' => 'text-info',
+            'icon' => '🔵',
+            'is_scaduta' => false
+        ];
+    } else {
+        return [
+            'text' => date('d/m/Y', strtotime($dataScadenza)),
+            'class' => 'text-muted',
+            'icon' => '🟢',
+            'is_scaduta' => false
+        ];
+    }
 }
 
 // Fine config.php

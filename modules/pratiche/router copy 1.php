@@ -108,7 +108,7 @@ if (in_array($requestedView, ['edit', 'view', 'task_manager', 'tracking'])) {
     }
     
     // Verifica permessi (admin o operatore assegnato)
-    if (!$currentUser['is_admin'] && $pratica['operatore_assegnato_id'] != $currentUser['id']) {
+    if (!$currentUser['is_admin'] && $pratica['operatore_responsabile_id'] != $currentUser['id']) {
         $_SESSION['error_message'] = '⚠️ Non hai i permessi per questa pratica';
         header('Location: /crm/?action=pratiche');
         exit;

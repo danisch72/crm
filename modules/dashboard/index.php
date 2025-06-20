@@ -4,7 +4,7 @@
  * File: /modules/dashboard/index.php
  * 
  * Dashboard principale come modulo
- * Uniformità con struttura modulare
+ * ✅ VERSIONE CON COMPONENTI CENTRALIZZATI
  */
 
 // ================================================================
@@ -19,6 +19,21 @@ require_once dirname(dirname(__DIR__)) . '/core/bootstrap.php';
 // CARICA DATABASE SE NECESSARIO
 // ================================================================
 loadDatabase(); // Funzione da bootstrap.php
+
+// Prepara variabili per i componenti
+$pageTitle = 'Dashboard';
+$pageIcon = '🏠';
+
+// Prepara sessionInfo per i componenti
+$currentUser = getCurrentUser();
+$sessionInfo = [
+    'operatore_id' => $currentUser['id'],
+    'nome' => $currentUser['nome'],
+    'cognome' => $currentUser['cognome'],
+    'email' => $currentUser['email'],
+    'nome_completo' => $currentUser['nome'] . ' ' . $currentUser['cognome'],
+    'is_admin' => $currentUser['is_admin']
+];
 
 /**
  * 🔧 Inizializza dati dashboard
@@ -155,390 +170,138 @@ try {
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title><?= $page_title ?></title>
     
-    <!-- CSS Esistenti -->
-    <link rel="stylesheet" href="<?= crmUrl('assets/css/datev-style.css') ?>">
-    <link rel="stylesheet" href="<?= crmUrl('assets/css/responsive.css') ?>">
-    
-    <style>
-    /* CSS Dashboard Integrato */
-    :root {
-        --primary: #007849;
-        --primary-dark: #005a37;
-        --secondary: #6c757d;
-        --success: #28a745;
-        --warning: #ffc107;
-        --danger: #dc3545;
-        --info: #17a2b8;
-        --light: #f8f9fa;
-        --dark: #343a40;
-    }
-
-    .dashboard-container {
-        max-width: 1400px;
-        margin: 0 auto;
-        padding: 24px;
-        background: #f5f7f9;
-        min-height: 100vh;
-    }
-
-    .dashboard-header {
-        background: white;
-        border-radius: 12px;
-        box-shadow: 0 2px 8px rgba(0,0,0,0.08);
-        padding: 24px;
-        margin-bottom: 24px;
-        display: flex;
-        justify-content: space-between;
-        align-items: center;
-        flex-wrap: wrap;
-    }
-
-    .welcome-section h1 {
-        color: var(--primary);
-        margin: 0;
-        font-size: 28px;
-    }
-
-    .welcome-section p {
-        color: #6c757d;
-        margin: 4px 0 0 0;
-    }
-
-    .header-actions {
-        display: flex;
-        gap: 12px;
-        align-items: center;
-        flex-wrap: wrap;
-    }
-
-    .btn {
-        padding: 10px 20px;
-        border-radius: 6px;
-        text-decoration: none;
-        font-weight: 500;
-        display: inline-flex;
-        align-items: center;
-        gap: 8px;
-        transition: all 0.2s;
-        border: none;
-        cursor: pointer;
-    }
-
-    .btn-primary {
-        background: var(--primary);
-        color: white;
-    }
-
-    .btn-primary:hover {
-        background: var(--primary-dark);
-        transform: translateY(-1px);
-    }
-
-    .btn-outline {
-        background: white;
-        color: var(--primary);
-        border: 2px solid var(--primary);
-    }
-
-    .btn-outline:hover {
-        background: var(--primary);
-        color: white;
-    }
-
-    /* Stats Grid */
-    .stats-grid {
-        display: grid;
-        grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
-        gap: 20px;
-        margin-bottom: 24px;
-    }
-
-    .stat-card {
-        background: white;
-        border-radius: 12px;
-        padding: 24px;
-        box-shadow: 0 2px 8px rgba(0,0,0,0.05);
-        transition: all 0.3s;
-        text-decoration: none;
-        color: inherit;
-        display: block;
-    }
-
-    .stat-card:hover {
-        transform: translateY(-2px);
-        box-shadow: 0 4px 16px rgba(0,0,0,0.1);
-    }
-
-    .stat-header {
-        display: flex;
-        justify-content: space-between;
-        align-items: flex-start;
-        margin-bottom: 16px;
-    }
-
-    .stat-icon {
-        font-size: 32px;
-        line-height: 1;
-    }
-
-    .stat-value {
-        font-size: 36px;
-        font-weight: bold;
-        line-height: 1;
-        margin-bottom: 8px;
-    }
-
-    .stat-title {
-        color: #6c757d;
-        font-size: 14px;
-        font-weight: 500;
-    }
-
-    .stat-subtitle {
-        color: #adb5bd;
-        font-size: 12px;
-        margin-top: 4px;
-    }
-
-    /* Alert System */
-    .alerts-section {
-        margin-bottom: 24px;
-    }
-
-    .alert {
-        padding: 16px;
-        border-radius: 8px;
-        margin-bottom: 12px;
-        display: flex;
-        align-items: center;
-        gap: 12px;
-    }
-
-    .alert-warning {
-        background: #fff3cd;
-        color: #856404;
-        border: 1px solid #ffeaa7;
-    }
-
-    .alert-danger {
-        background: #f8d7da;
-        color: #721c24;
-        border: 1px solid #f5c6cb;
-    }
-
-    /* Main Content Grid */
-    .content-grid {
-        display: grid;
-        grid-template-columns: 2fr 1fr;
-        gap: 24px;
-    }
-
-    .content-card {
-        background: white;
-        border-radius: 12px;
-        box-shadow: 0 2px 8px rgba(0,0,0,0.05);
-        padding: 24px;
-    }
-
-    .content-card h2 {
-        margin: 0 0 20px 0;
-        color: var(--primary);
-        font-size: 20px;
-    }
-
-    /* Responsive */
-    @media (max-width: 992px) {
-        .content-grid {
-            grid-template-columns: 1fr;
-        }
-    }
-
-    @media (max-width: 768px) {
-        .dashboard-header {
-            flex-direction: column;
-            align-items: flex-start;
-            gap: 16px;
-        }
-        
-        .stats-grid {
-            grid-template-columns: 1fr;
-        }
-    }
-
-    /* Quick Actions */
-    .quick-actions {
-        display: grid;
-        gap: 12px;
-    }
-
-    .action-item {
-        padding: 12px 16px;
-        background: #f8f9fa;
-        border-radius: 6px;
-        display: flex;
-        justify-content: space-between;
-        align-items: center;
-        text-decoration: none;
-        color: inherit;
-        transition: background 0.2s;
-    }
-
-    .action-item:hover {
-        background: #e9ecef;
-    }
-
-    /* Recent Activities */
-    .activity-list {
-        display: flex;
-        flex-direction: column;
-        gap: 12px;
-    }
-
-    .activity-item {
-        padding: 12px;
-        background: #f8f9fa;
-        border-radius: 6px;
-        font-size: 14px;
-    }
-
-    .activity-time {
-        color: #6c757d;
-        font-size: 12px;
-    }
-
-    /* Loading State */
-    .loading {
-        text-align: center;
-        padding: 40px;
-        color: #6c757d;
-    }
-
-    .spinner {
-        border: 3px solid #f3f3f3;
-        border-top: 3px solid var(--primary);
-        border-radius: 50%;
-        width: 40px;
-        height: 40px;
-        animation: spin 1s linear infinite;
-        margin: 0 auto;
-    }
-
-    @keyframes spin {
-        0% { transform: rotate(0deg); }
-        100% { transform: rotate(360deg); }
-    }
-    </style>
+    <!-- CSS Unificato -->
+    <link rel="stylesheet" href="/crm/assets/css/datev-koinos-unified.css">
 </head>
 <body>
-    <div class="dashboard-container">
-        <!-- Header -->
-        <div class="dashboard-header">
-            <div class="welcome-section">
-                <h1>Benvenuto, <?= htmlspecialchars($user['nome'] ?? 'Utente') ?>!</h1>
-                <p>Ultimo aggiornamento: <?= $last_updated ?></p>
-            </div>
-            <div class="header-actions">
-                <a href="?action=clienti&view=create" class="btn btn-primary">
-                    ➕ Nuovo Cliente
-                </a>
-                <a href="?action=operatori" class="btn btn-outline">
-                    👥 Operatori
-                </a>
-                <a href="?action=logout" class="btn btn-outline">
-                    🚪 Esci
-                </a>
-            </div>
-        </div>
+    <div class="app-layout">
+        <!-- ✅ COMPONENTE SIDEBAR (OBBLIGATORIO) -->
+        <?php include $_SERVER['DOCUMENT_ROOT'] . '/crm/components/navigation.php'; ?>
+        
+        <div class="content-wrapper">
+            <!-- ✅ COMPONENTE HEADER (OBBLIGATORIO) -->
+            <?php include $_SERVER['DOCUMENT_ROOT'] . '/crm/components/header.php'; ?>
+            
+            <main class="main-content">
+                <div class="container">
+                    <!-- Welcome Section -->
+                    <div class="mb-3">
+                        <h1 class="text-2xl font-bold">Benvenuto, <?= htmlspecialchars($user['nome'] ?? 'Utente') ?>!</h1>
+                        <p class="text-muted">Ultimo aggiornamento: <?= $last_updated ?></p>
+                    </div>
 
-        <!-- Stats Grid -->
-        <div class="stats-grid">
-            <?php foreach ($stats_cards as $stat): ?>
-                <a href="<?= htmlspecialchars($stat['link']) ?>" class="stat-card">
-                    <div class="stat-header">
-                        <div>
-                            <div class="stat-value">
-                                <?= htmlspecialchars($stat['value']) ?>
-                                <?php if (isset($stat['total'])): ?>
-                                    <span style="font-size: 18px; color: #6c757d;">
-                                        / <?= htmlspecialchars($stat['total']) ?>
-                                    </span>
-                                <?php endif; ?>
+                    <!-- Stats Grid -->
+                    <div class="row mb-3">
+                        <?php foreach ($stats_cards as $stat): ?>
+                            <div class="col-md-3 mb-2">
+                                <a href="<?= htmlspecialchars($stat['link']) ?>" class="text-decoration-none">
+                                    <div class="stat-card">
+                                        <div class="d-flex justify-content-between align-items-start mb-2">
+                                            <div>
+                                                <div class="stat-value">
+                                                    <?= htmlspecialchars($stat['value']) ?>
+                                                    <?php if (isset($stat['total'])): ?>
+                                                        <span class="text-muted" style="font-size: 0.875rem;">
+                                                            / <?= htmlspecialchars($stat['total']) ?>
+                                                        </span>
+                                                    <?php endif; ?>
+                                                </div>
+                                                <div class="stat-label"><?= htmlspecialchars($stat['title']) ?></div>
+                                                <?php if (isset($stat['subtitle'])): ?>
+                                                    <div class="text-muted" style="font-size: 0.75rem;">
+                                                        <?= htmlspecialchars($stat['subtitle']) ?>
+                                                    </div>
+                                                <?php endif; ?>
+                                            </div>
+                                            <div style="font-size: 2rem;"><?= $stat['icon'] ?></div>
+                                        </div>
+                                    </div>
+                                </a>
                             </div>
-                            <div class="stat-title"><?= htmlspecialchars($stat['title']) ?></div>
-                            <?php if (isset($stat['subtitle'])): ?>
-                                <div class="stat-subtitle"><?= htmlspecialchars($stat['subtitle']) ?></div>
-                            <?php endif; ?>
+                        <?php endforeach; ?>
+                    </div>
+
+                    <!-- Alerts -->
+                    <?php if (!empty($criticalAlerts)): ?>
+                        <div class="mb-3">
+                            <?php foreach ($criticalAlerts as $alert): ?>
+                                <div class="alert alert-<?= htmlspecialchars($alert['type']) ?>">
+                                    <strong><?= htmlspecialchars($alert['title']) ?>:</strong>
+                                    <?= htmlspecialchars($alert['message']) ?>
+                                    <?php if (isset($alert['action'])): ?>
+                                        <a href="<?= htmlspecialchars($alert['action']) ?>" style="margin-left: auto;">
+                                            Visualizza →
+                                        </a>
+                                    <?php endif; ?>
+                                </div>
+                            <?php endforeach; ?>
                         </div>
-                        <div class="stat-icon"><?= $stat['icon'] ?></div>
-                    </div>
-                </a>
-            <?php endforeach; ?>
-        </div>
+                    <?php endif; ?>
 
-        <!-- Alerts -->
-        <?php if (!empty($criticalAlerts)): ?>
-            <div class="alerts-section">
-                <?php foreach ($criticalAlerts as $alert): ?>
-                    <div class="alert alert-<?= htmlspecialchars($alert['type']) ?>">
-                        <strong><?= htmlspecialchars($alert['title']) ?>:</strong>
-                        <?= htmlspecialchars($alert['message']) ?>
-                        <?php if (isset($alert['action'])): ?>
-                            <a href="<?= htmlspecialchars($alert['action']) ?>" style="margin-left: auto;">
-                                Visualizza →
-                            </a>
-                        <?php endif; ?>
-                    </div>
-                <?php endforeach; ?>
-            </div>
-        <?php endif; ?>
+                    <!-- Main Content Grid -->
+                    <div class="row">
+                        <!-- Recent Activities -->
+                        <div class="col-md-8 mb-3">
+                            <div class="card">
+                                <div class="card-header">
+                                    <h3 class="card-title">📊 Attività Recenti</h3>
+                                </div>
+                                <div class="card-body">
+                                    <div class="activity-list">
+                                        <div class="p-3 mb-2 bg-light rounded">
+                                            <div class="d-flex justify-content-between">
+                                                <div>🆕 Nuovo cliente registrato: Esempio SRL</div>
+                                                <div class="text-muted">2 ore fa</div>
+                                            </div>
+                                        </div>
+                                        <div class="p-3 mb-2 bg-light rounded">
+                                            <div class="d-flex justify-content-between">
+                                                <div>📋 Pratica completata per Cliente ABC</div>
+                                                <div class="text-muted">4 ore fa</div>
+                                            </div>
+                                        </div>
+                                        <div class="p-3 mb-2 bg-light rounded">
+                                            <div class="d-flex justify-content-between">
+                                                <div>📧 Email inviata a 15 clienti</div>
+                                                <div class="text-muted">Ieri alle 18:30</div>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
 
-        <!-- Main Content -->
-        <div class="content-grid">
-            <!-- Recent Activities -->
-            <div class="content-card">
-                <h2>📊 Attività Recenti</h2>
-                <div class="activity-list">
-                    <div class="activity-item">
-                        <div>🆕 Nuovo cliente registrato: Esempio SRL</div>
-                        <div class="activity-time">2 ore fa</div>
-                    </div>
-                    <div class="activity-item">
-                        <div>📋 Pratica completata per Cliente ABC</div>
-                        <div class="activity-time">4 ore fa</div>
-                    </div>
-                    <div class="activity-item">
-                        <div>📧 Email inviata a 15 clienti</div>
-                        <div class="activity-time">Ieri alle 18:30</div>
+                        <!-- Quick Actions -->
+                        <div class="col-md-4 mb-3">
+                            <div class="card">
+                                <div class="card-header">
+                                    <h3 class="card-title">⚡ Azioni Rapide</h3>
+                                </div>
+                                <div class="card-body">
+                                    <div class="d-grid gap-2">
+                                        <a href="?action=clienti&view=create" class="btn btn-primary">
+                                            ➕ Nuovo Cliente
+                                        </a>
+                                        <a href="?action=operatori&view=create" class="btn btn-secondary">
+                                            👥 Nuovo Operatore
+                                        </a>
+                                        <a href="?action=pratiche&view=create" class="btn btn-secondary">
+                                            📁 Nuova Pratica
+                                        </a>
+                                        <hr>
+                                        <a href="?action=reports" class="btn btn-sm btn-secondary">
+                                            📊 Report e Statistiche
+                                        </a>
+                                        <a href="?action=settings" class="btn btn-sm btn-secondary">
+                                            ⚙️ Impostazioni
+                                        </a>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
                     </div>
                 </div>
-            </div>
-
-            <!-- Quick Actions -->
-            <div class="content-card">
-                <h2>⚡ Azioni Rapide</h2>
-                <div class="quick-actions">
-                    <a href="?action=clienti" class="action-item">
-                        <span>🏢 Gestione Clienti</span>
-                        <span>→</span>
-                    </a>
-                    <a href="?action=operatori" class="action-item">
-                        <span>👥 Gestione Operatori</span>
-                        <span>→</span>
-                    </a>
-                    <a href="?action=pratiche" class="action-item">
-                        <span>📁 Pratiche in Corso</span>
-                        <span>→</span>
-                    </a>
-                    <a href="?action=scadenze" class="action-item">
-                        <span>📅 Scadenzario</span>
-                        <span>→</span>
-                    </a>
-                    <a href="?action=reports" class="action-item">
-                        <span>📊 Report e Statistiche</span>
-                        <span>→</span>
-                    </a>
-                </div>
-            </div>
+            </main>
         </div>
     </div>
 
@@ -563,7 +326,12 @@ try {
                         current = value;
                         clearInterval(timer);
                     }
-                    element.textContent = Math.floor(current) + text.substring(match[0].length);
+                    const parts = text.split('/');
+                    if (parts.length > 1) {
+                        element.innerHTML = Math.floor(current) + ' <span class="text-muted" style="font-size: 0.875rem;">/ ' + parts[1].trim() + '</span>';
+                    } else {
+                        element.textContent = Math.floor(current) + text.substring(match[0].length);
+                    }
                 }, 50);
             }
         });
