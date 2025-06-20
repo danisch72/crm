@@ -3,6 +3,8 @@
  * modules/pratiche/index_list.php - Lista Pratiche + Vista Kanban
  * 
  * ✅ GESTIONE PRATICHE CON VISTA KANBAN E LISTA
+ * ✅ CSS COMPLETAMENTE CENTRALIZZATO
+ * ✅ ZERO STILI INLINE
  */
 
 // Verifica router
@@ -139,8 +141,9 @@ $pageIcon = '📋';
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Gestione Pratiche - CRM Re.De Consulting</title>
-    <link rel="stylesheet" href="/crm/assets/css/design-system.css">
-    <link rel="stylesheet" href="/crm/assets/css/datev-optimal.css">
+    
+    <!-- SOLO CSS UNIFICATO - NIENTE STILI INLINE! -->
+    <link rel="stylesheet" href="/crm/assets/css/datev-koinos-unified.css">
 </head>
 <body>
     <div class="app-layout">
@@ -156,281 +159,281 @@ $pageIcon = '📋';
             ?>
             
             <main class="main-content">
-                <div class="pratiche-container">
-                    <!-- Header con statistiche -->
-                    <div class="pratiche-header">
-                        <div class="header-top">
-                            <h1 class="page-title">📋 Gestione Pratiche</h1>
-                            <div class="header-actions">
-                                <button class="btn-icon" onclick="toggleView()" title="Cambia vista">
-                                    <?= $viewMode === 'kanban' ? '📋' : '🎯' ?>
-                                </button>
-                                <a href="/crm/?action=pratiche&view=create" class="btn btn-primary">
-                                    ➕ Nuova Pratica
-                                </a>
-                            </div>
-                        </div>
-                        
-                        <div class="stats-row">
-                            <div class="stat-card">
-                                <span class="stat-value"><?= $stats['totali'] ?></span>
-                                <span class="stat-label">Pratiche Totali</span>
-                            </div>
-                            <div class="stat-card danger">
-                                <span class="stat-value"><?= $stats['urgenti'] ?></span>
-                                <span class="stat-label">Urgenti</span>
-                            </div>
-                            <div class="stat-card danger">
-                                <span class="stat-value"><?= $stats['scadute'] ?></span>
-                                <span class="stat-label">Scadute</span>
-                            </div>
-                            <div class="stat-card warning">
-                                <span class="stat-value"><?= $stats['in_scadenza'] ?></span>
-                                <span class="stat-label">In Scadenza</span>
-                            </div>
-                        </div>
-                    </div>
-                    
+                <div class="container">
                     <!-- Messaggi flash -->
                     <?php if ($success_message): ?>
-                    <div class="alert alert-success" style="background: #d1fae5; color: #065f46; padding: 1rem; border-radius: 6px; margin-bottom: 1rem;">
+                    <div class="alert alert-success animate-fade-in">
                         <?= htmlspecialchars($success_message) ?>
                     </div>
                     <?php endif; ?>
                     
                     <?php if ($error_message): ?>
-                    <div class="alert alert-danger" style="background: #fee2e2; color: #dc2626; padding: 1rem; border-radius: 6px; margin-bottom: 1rem;">
+                    <div class="alert alert-danger animate-fade-in">
                         <?= htmlspecialchars($error_message) ?>
                     </div>
                     <?php endif; ?>
                     
+                    <!-- Header con statistiche -->
+                    <div class="card mb-3">
+                        <div class="card-body">
+                            <div class="d-flex justify-content-between align-items-center mb-3">
+                                <h1 class="h3 m-0">📋 Gestione Pratiche</h1>
+                                <div class="d-flex gap-2">
+                                    <button class="btn btn-secondary btn-sm" onclick="toggleView()" title="Cambia vista">
+                                        <?= $viewMode === 'kanban' ? '📋 Vista Lista' : '🎯 Vista Kanban' ?>
+                                    </button>
+                                    <a href="/crm/?action=pratiche&view=create" class="btn btn-primary btn-sm">
+                                        ➕ Nuova Pratica
+                                    </a>
+                                </div>
+                            </div>
+                            
+                            <!-- Statistiche -->
+                            <div class="row g-2">
+                                <div class="col-md-3">
+                                    <div class="stat-card">
+                                        <div class="stat-value"><?= $stats['totali'] ?></div>
+                                        <div class="stat-label">Pratiche Totali</div>
+                                    </div>
+                                </div>
+                                <div class="col-md-3">
+                                    <div class="stat-card text-danger">
+                                        <div class="stat-value"><?= $stats['urgenti'] ?></div>
+                                        <div class="stat-label">Urgenti</div>
+                                    </div>
+                                </div>
+                                <div class="col-md-3">
+                                    <div class="stat-card text-danger">
+                                        <div class="stat-value"><?= $stats['scadute'] ?></div>
+                                        <div class="stat-label">Scadute</div>
+                                    </div>
+                                </div>
+                                <div class="col-md-3">
+                                    <div class="stat-card text-warning">
+                                        <div class="stat-value"><?= $stats['in_scadenza'] ?></div>
+                                        <div class="stat-label">In Scadenza</div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                    
                     <!-- Filtri -->
-                    <div class="filters-bar">
-                        <form class="filters-form" method="GET">
-                            <input type="hidden" name="action" value="pratiche">
-                            <input type="hidden" name="mode" value="<?= $viewMode ?>">
-                            
-                            <div class="filter-group">
-                                <input type="text" 
-                                       name="cliente" 
-                                       id="filterCliente"
-                                       class="filter-input" 
-                                       placeholder="🔍 Cerca cliente..."
-                                       value="<?= htmlspecialchars($filterCliente) ?>">
-                            </div>
-                            
-                            <div class="filter-group">
-                                <select name="tipo" id="filterTipo" class="filter-input filter-select">
-                                    <option value="">Tutti i tipi</option>
-                                    <?php foreach (PRATICHE_TYPES as $key => $tipo): ?>
-                                    <option value="<?= $key ?>" <?= $filterTipo === $key ? 'selected' : '' ?>>
-                                        <?= $tipo['icon'] ?> <?= $tipo['label'] ?>
-                                    </option>
-                                    <?php endforeach; ?>
-                                </select>
-                            </div>
-                            
-                            <div class="filter-group">
-                                <select name="stato" id="filterStato" class="filter-input filter-select">
-                                    <option value="">Tutti gli stati</option>
-                                    <option value="active" <?= $filterStato === 'active' ? 'selected' : '' ?>>
-                                        🟢 Pratiche Attive
-                                    </option>
-                                    <optgroup label="Stati specifici">
-                                        <?php foreach (PRATICHE_STATI as $key => $stato): ?>
-                                        <option value="<?= $key ?>" <?= $filterStato === $key ? 'selected' : '' ?>>
-                                            <?= $stato['icon'] ?> <?= $stato['label'] ?>
+                    <div class="card mb-3">
+                        <div class="card-body">
+                            <form method="GET" action="/crm/" class="row g-2">
+                                <input type="hidden" name="action" value="pratiche">
+                                <input type="hidden" name="mode" value="<?= $viewMode ?>">
+                                
+                                <div class="col-md-3">
+                                    <input type="text" 
+                                           name="cliente" 
+                                           class="form-control form-control-sm" 
+                                           placeholder="🔍 Cerca cliente..."
+                                           value="<?= htmlspecialchars($filterCliente) ?>">
+                                </div>
+                                
+                                <div class="col-md-2">
+                                    <select name="tipo" class="form-select form-select-sm">
+                                        <option value="">Tutti i tipi</option>
+                                        <?php foreach (PRATICHE_TYPES as $key => $tipo): ?>
+                                        <option value="<?= $key ?>" <?= $filterTipo === $key ? 'selected' : '' ?>>
+                                            <?= $tipo['icon'] ?> <?= $tipo['label'] ?>
                                         </option>
                                         <?php endforeach; ?>
-                                    </optgroup>
-                                </select>
-                            </div>
-                            
-                            <?php if ($currentUser['is_admin'] && !empty($operatori)): ?>
-                            <div class="filter-group">
-                                <select name="operatore" id="filterOperatore" class="filter-input filter-select">
-                                    <option value="">Tutti gli operatori</option>
-                                    <?php foreach ($operatori as $op): ?>
-                                    <option value="<?= $op['id'] ?>" <?= $filterOperatore == $op['id'] ? 'selected' : '' ?>>
-                                        <?= htmlspecialchars($op['nome_completo']) ?>
-                                    </option>
-                                    <?php endforeach; ?>
-                                </select>
-                            </div>
-                            <?php endif; ?>
-                            
-                            <button type="submit" class="btn btn-primary btn-sm">
-                                🔍 Filtra
-                            </button>
-                            
-                            <a href="/crm/?action=pratiche&mode=<?= $viewMode ?>" class="btn btn-secondary btn-sm">
-                                ✖ Reset
-                            </a>
-                        </form>
+                                    </select>
+                                </div>
+                                
+                                <div class="col-md-2">
+                                    <select name="stato" class="form-select form-select-sm">
+                                        <option value="">Tutti gli stati</option>
+                                        <option value="active" <?= $filterStato === 'active' ? 'selected' : '' ?>>
+                                            🟢 Pratiche Attive
+                                        </option>
+                                        <optgroup label="Stati specifici">
+                                            <?php foreach (PRATICHE_STATI as $key => $stato): ?>
+                                            <option value="<?= $key ?>" <?= $filterStato === $key ? 'selected' : '' ?>>
+                                                <?= $stato['icon'] ?> <?= $stato['label'] ?>
+                                            </option>
+                                            <?php endforeach; ?>
+                                        </optgroup>
+                                    </select>
+                                </div>
+                                
+                                <?php if ($currentUser['is_admin'] && !empty($operatori)): ?>
+                                <div class="col-md-2">
+                                    <select name="operatore" class="form-select form-select-sm">
+                                        <option value="">Tutti gli operatori</option>
+                                        <?php foreach ($operatori as $op): ?>
+                                        <option value="<?= $op['id'] ?>" <?= $filterOperatore == $op['id'] ? 'selected' : '' ?>>
+                                            <?= htmlspecialchars($op['nome_completo']) ?>
+                                        </option>
+                                        <?php endforeach; ?>
+                                    </select>
+                                </div>
+                                <?php endif; ?>
+                                
+                                <div class="col-auto">
+                                    <button type="submit" class="btn btn-primary btn-sm">
+                                        🔍 Filtra
+                                    </button>
+                                </div>
+                                
+                                <div class="col-auto">
+                                    <a href="/crm/?action=pratiche&mode=<?= $viewMode ?>" class="btn btn-secondary btn-sm">
+                                        ✖ Reset
+                                    </a>
+                                </div>
+                            </form>
+                        </div>
                     </div>
                     
                     <!-- Vista contenuto -->
                     <?php if ($viewMode === 'kanban'): ?>
-                        <!-- Vista Kanban -->
+                        <!-- Vista Kanban - USANDO SOLO CLASSI CSS -->
                         <div class="kanban-board">
                             <?php foreach (PRATICHE_STATI as $stato => $statoConfig): ?>
                             <div class="kanban-column" data-stato="<?= $stato ?>">
                                 <div class="kanban-header">
-                                    <div class="kanban-title">
-                                        <span><?= $statoConfig['icon'] ?></span>
-                                        <span><?= $statoConfig['label'] ?></span>
-                                    </div>
-                                    <span class="kanban-count"><?= count($praticheByStato[$stato] ?? []) ?></span>
+                                    <h4 class="kanban-title">
+                                        <?= $statoConfig['icon'] ?> <?= $statoConfig['label'] ?>
+                                    </h4>
+                                    <span class="badge bg-secondary"><?= count($praticheByStato[$stato] ?? []) ?></span>
                                 </div>
                                 
-                                <div class="kanban-cards">
-                                    <?php foreach (($praticheByStato[$stato] ?? []) as $pratica): ?>
-                                    <div class="pratica-card" 
-                                         draggable="true" 
-                                         data-pratica-id="<?= $pratica['id'] ?>"
+                                <div class="kanban-cards" id="kanban-<?= $stato ?>">
+                                    <?php foreach ($praticheByStato[$stato] ?? [] as $pratica): ?>
+                                    <div class="kanban-card" 
+                                         data-id="<?= $pratica['id'] ?>"
+                                         data-tipo="<?= $pratica['tipo_pratica'] ?>"
+                                         data-priorita="<?= $pratica['priorita'] ?>"
+                                         draggable="true"
                                          onclick="viewPratica(<?= $pratica['id'] ?>)">
-                                        <div class="card-header">
-                                            <span class="card-tipo" style="color: <?= $pratica['tipo_config']['color'] ?>">
-                                                <?= $pratica['tipo_config']['icon'] ?>
+                                        
+                                        <div class="kanban-card-header">
+                                            <span class="badge badge-tipo-<?= $pratica['tipo_pratica'] ?>">
+                                                <?= $pratica['tipo_config']['icon'] ?> <?= $pratica['tipo_config']['label'] ?>
                                             </span>
-                                            <span class="card-priorita priorita-<?= $pratica['priorita'] ?>">
+                                            <span class="badge badge-priorita-<?= $pratica['priorita'] ?>">
                                                 <?= $pratica['priorita_config']['label'] ?>
                                             </span>
                                         </div>
                                         
-                                        <div class="card-title" title="<?= htmlspecialchars($pratica['titolo']) ?>">
-                                            <?= htmlspecialchars($pratica['titolo']) ?>
+                                        <div class="kanban-card-body">
+                                            <h6 class="kanban-card-title"><?= htmlspecialchars($pratica['cliente_nome']) ?></h6>
+                                            <p class="kanban-card-subtitle"><?= htmlspecialchars($pratica['titolo'] ?? 'Pratica #' . $pratica['id']) ?></p>
                                         </div>
                                         
-                                        <div class="card-cliente">
-                                            <?= htmlspecialchars($pratica['cliente_nome']) ?>
-                                        </div>
-                                        
-                                        <div class="card-meta">
-                                            <?php if ($pratica['giorni_scadenza'] < 0): ?>
-                                                <span style="color: #dc2626;">⚠️ Scaduta</span>
-                                            <?php elseif ($pratica['giorni_scadenza'] <= 3): ?>
-                                                <span style="color: #f59e0b;">⏰ <?= $pratica['giorni_scadenza'] ?>gg</span>
-                                            <?php else: ?>
-                                                <span>📅 <?= date('d/m', strtotime($pratica['data_scadenza'])) ?></span>
+                                        <div class="kanban-card-footer">
+                                            <div class="d-flex justify-content-between align-items-center">
+                                                <small class="text-muted">
+                                                    <?= $pratica['operatore_nome'] ?>
+                                                </small>
+                                                <div class="progress progress-sm">
+                                                    <div class="progress-bar" data-progress="<?= $pratica['progress'] ?>"></div>
+                                                </div>
+                                            </div>
+                                            <?php if ($pratica['giorni_scadenza'] <= 7): ?>
+                                            <div class="mt-1">
+                                                <span class="badge <?= $pratica['giorni_scadenza'] < 0 ? 'badge-danger' : 'badge-warning' ?>">
+                                                    <?= $pratica['giorni_scadenza'] < 0 ? 'Scaduta da ' . abs($pratica['giorni_scadenza']) . 'gg' : 'Scade tra ' . $pratica['giorni_scadenza'] . 'gg' ?>
+                                                </span>
+                                            </div>
                                             <?php endif; ?>
-                                            
-                                            <?php if ($pratica['totale_task'] > 0): ?>
-                                                <span>📋 <?= $pratica['task_completati'] ?>/<?= $pratica['totale_task'] ?></span>
-                                            <?php endif; ?>
-                                            
-                                            <span>👤 <?= explode(' ', $pratica['operatore_nome'])[0] ?></span>
                                         </div>
-                                        
-                                        <?php if ($pratica['totale_task'] > 0): ?>
-                                        <div class="card-progress">
-                                            <div class="progress-bar" style="width: <?= $pratica['progress'] ?>%"></div>
-                                        </div>
-                                        <?php endif; ?>
                                     </div>
                                     <?php endforeach; ?>
                                 </div>
                             </div>
                             <?php endforeach; ?>
                         </div>
-                        
                     <?php else: ?>
                         <!-- Vista Lista -->
-                        <div class="pratiche-list">
-                            <?php if (!empty($pratiche)): ?>
-                                <div class="list-header">
-                                    <div>Pratica</div>
-                                    <div>Cliente</div>
-                                    <div>Stato</div>
-                                    <div>Scadenza</div>
-                                    <div>Progress</div>
-                                    <div>Azioni</div>
-                                </div>
-                                
-                                <?php foreach ($pratiche as $pratica): ?>
-                                <div class="list-item">
-                                    <div class="pratica-info">
-                                        <div class="tipo-icon" style="background: <?= $pratica['tipo_config']['color'] ?>20; color: <?= $pratica['tipo_config']['color'] ?>">
-                                            <?= $pratica['tipo_config']['icon'] ?>
-                                        </div>
-                                        <div class="pratica-details">
-                                            <div class="pratica-title">
-                                                <?= htmlspecialchars($pratica['titolo']) ?>
-                                            </div>
-                                            <div class="pratica-meta">
-                                                <?= $pratica['tipo_config']['label'] ?> • 
-                                                <span class="badge priorita-<?= $pratica['priorita'] ?>" style="padding: 0.125rem 0.375rem;">
+                        <div class="card">
+                            <div class="table-container">
+                                <table class="table">
+                                    <thead>
+                                        <tr>
+                                            <th width="5%">#</th>
+                                            <th width="20%">Cliente</th>
+                                            <th width="15%">Tipo</th>
+                                            <th width="10%">Stato</th>
+                                            <th width="10%">Priorità</th>
+                                            <th width="10%">Scadenza</th>
+                                            <th width="10%">Progress</th>
+                                            <th width="15%">Operatore</th>
+                                            <th width="5%">Azioni</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        <?php foreach ($pratiche as $pratica): ?>
+                                        <tr>
+                                            <td><?= str_pad($pratica['id'], 4, '0', STR_PAD_LEFT) ?></td>
+                                            <td>
+                                                <div class="d-flex flex-column">
+                                                    <strong><?= htmlspecialchars($pratica['cliente_nome']) ?></strong>
+                                                    <small class="text-muted"><?= htmlspecialchars($pratica['titolo'] ?? 'Pratica #' . $pratica['id']) ?></small>
+                                                </div>
+                                            </td>
+                                            <td>
+                                                <span class="badge badge-tipo-<?= $pratica['tipo_pratica'] ?>">
+                                                    <?= $pratica['tipo_config']['icon'] ?> <?= $pratica['tipo_config']['label'] ?>
+                                                </span>
+                                            </td>
+                                            <td>
+                                                <span class="badge badge-stato-<?= $pratica['stato'] ?>">
+                                                    <?= $pratica['stato_config']['icon'] ?> <?= $pratica['stato_config']['label'] ?>
+                                                </span>
+                                            </td>
+                                            <td>
+                                                <span class="badge badge-priorita-<?= $pratica['priorita'] ?>">
                                                     <?= $pratica['priorita_config']['label'] ?>
                                                 </span>
-                                            </div>
-                                        </div>
-                                    </div>
-                                    
-                                    <div>
-                                        <div style="font-size: 0.875rem; color: #1f2937;">
-                                            <?= htmlspecialchars($pratica['cliente_nome']) ?>
-                                        </div>
-                                        <div style="font-size: 0.75rem; color: #6b7280;">
-                                            <?= htmlspecialchars($pratica['cliente_cf'] ?? '') ?>
-                                        </div>
-                                    </div>
-                                    
-                                    <div>
-                                        <span class="badge stato-<?= $pratica['stato'] ?>">
-                                            <?= $pratica['stato_config']['icon'] ?> <?= $pratica['stato_config']['label'] ?>
-                                        </span>
-                                    </div>
-                                    
-                                    <div>
-                                        <?php 
-                                        $scadenzaInfo = getScadenzaInfo($pratica['data_scadenza']);
-                                        ?>
-                                        <span class="<?= $scadenzaInfo['class'] ?>" style="font-size: 0.875rem;">
-                                            <?= $scadenzaInfo['icon'] ?> <?= $scadenzaInfo['text'] ?>
-                                        </span>
-                                    </div>
-                                    
-                                    <div>
-                                        <?php if ($pratica['totale_task'] > 0): ?>
-                                            <div style="display: flex; align-items: center; gap: 0.5rem;">
-                                                <div style="flex: 1; background: #e5e7eb; height: 6px; border-radius: 3px; overflow: hidden;">
-                                                    <div style="width: <?= $pratica['progress'] ?>%; height: 100%; background: #10b981;"></div>
+                                            </td>
+                                            <td>
+                                                <?php if ($pratica['giorni_scadenza'] < 0): ?>
+                                                    <span class="text-danger">
+                                                        <strong>Scaduta da <?= abs($pratica['giorni_scadenza']) ?>gg</strong>
+                                                    </span>
+                                                <?php elseif ($pratica['giorni_scadenza'] <= 7): ?>
+                                                    <span class="text-warning">
+                                                        <strong>Tra <?= $pratica['giorni_scadenza'] ?>gg</strong>
+                                                    </span>
+                                                <?php else: ?>
+                                                    <span class="text-muted">
+                                                        <?= date('d/m/Y', strtotime($pratica['data_scadenza'])) ?>
+                                                    </span>
+                                                <?php endif; ?>
+                                            </td>
+                                            <td>
+                                                <div class="progress">
+                                                    <div class="progress-bar" data-progress="<?= $pratica['progress'] ?>">
+                                                        <?= $pratica['progress'] ?>%
+                                                    </div>
                                                 </div>
-                                                <span style="font-size: 0.75rem; color: #6b7280; min-width: 35px; text-align: right;">
-                                                    <?= $pratica['progress'] ?>%
-                                                </span>
-                                            </div>
-                                        <?php else: ?>
-                                            <span style="font-size: 0.75rem; color: #9ca3af;">-</span>
-                                        <?php endif; ?>
-                                    </div>
-                                    
-                                    <div style="display: flex; gap: 0.375rem;">
-                                        <a href="/crm/?action=pratiche&view=view&id=<?= $pratica['id'] ?>" 
-                                           class="btn btn-sm btn-secondary">
-                                            👁️ Apri
-                                        </a>
-                                        <a href="/crm/?action=pratiche&view=task_manager&id=<?= $pratica['id'] ?>" 
-                                           class="btn btn-sm btn-secondary">
-                                            📋 Task
-                                        </a>
-                                    </div>
-                                </div>
-                                <?php endforeach; ?>
-                            <?php endif; ?>
-                            
-                            <?php if (empty($pratiche)): ?>
-                                <div class="empty-state">
-                                    <div class="empty-state-icon">📋</div>
-                                    <div class="empty-state-title">Nessuna pratica trovata</div>
-                                    <div class="empty-state-text">
-                                        Modifica i filtri o crea una nuova pratica
-                                    </div>
-                                    <a href="/crm/?action=pratiche&view=create" class="btn btn-primary">
-                                        ➕ Crea Prima Pratica
-                                    </a>
-                                </div>
-                            <?php endif; ?>
+                                            </td>
+                                            <td><?= htmlspecialchars($pratica['operatore_nome']) ?></td>
+                                            <td>
+                                                <div class="btn-group btn-group-sm">
+                                                    <a href="/crm/?action=pratiche&view=view&id=<?= $pratica['id'] ?>" 
+                                                       class="btn btn-sm btn-primary" 
+                                                       title="Visualizza">
+                                                        👁️
+                                                    </a>
+                                                    <?php if ($pratica['stato_config']['can_edit']): ?>
+                                                    <a href="/crm/?action=pratiche&view=edit&id=<?= $pratica['id'] ?>" 
+                                                       class="btn btn-sm btn-secondary" 
+                                                       title="Modifica">
+                                                        ✏️
+                                                    </a>
+                                                    <?php endif; ?>
+                                                </div>
+                                            </td>
+                                        </tr>
+                                        <?php endforeach; ?>
+                                    </tbody>
+                                </table>
+                            </div>
                         </div>
                     <?php endif; ?>
                 </div>
@@ -438,88 +441,127 @@ $pageIcon = '📋';
         </div>
     </div>
     
+    <!-- Script SENZA CSS INLINE -->
     <script>
-        // Gestione filtri
-        function applyFilters() {
-            const params = new URLSearchParams(window.location.search);
-            
-            params.set('cliente', document.getElementById('filterCliente').value);
-            params.set('tipo', document.getElementById('filterTipo').value);
-            params.set('stato', document.getElementById('filterStato').value);
-            
-            <?php if ($currentUser['is_admin']): ?>
-            params.set('operatore', document.getElementById('filterOperatore').value);
-            <?php endif; ?>
-            
-            window.location.href = '?' + params.toString();
-        }
-        
-        // Toggle vista
-        function toggleView() {
-            const params = new URLSearchParams(window.location.search);
-            const currentMode = params.get('mode') || '<?= PRATICHE_UI_CONFIG['default_view'] ?>';
-            params.set('mode', currentMode === 'kanban' ? 'list' : 'kanban');
-            window.location.href = '?' + params.toString();
-        }
-        
-        // Navigazione
-        function viewPratica(id) {
-            window.location.href = `/crm/?action=pratiche&view=view&id=${id}`;
-        }
-        
-        function editPratica(id) {
-            window.location.href = `/crm/?action=pratiche&view=edit&id=${id}`;
-        }
-        
-        function viewTasks(id) {
-            window.location.href = `/crm/?action=pratiche&view=task_manager&id=${id}`;
-        }
-        
-        // Drag & Drop per Kanban
-        <?php if ($viewMode === 'kanban'): ?>
-        document.addEventListener('DOMContentLoaded', function() {
-            const cards = document.querySelectorAll('.pratica-card');
-            const columns = document.querySelectorAll('.kanban-column');
-            
-            let draggedCard = null;
-            
-            cards.forEach(card => {
-                card.addEventListener('dragstart', function(e) {
-                    draggedCard = this;
-                    this.classList.add('dragging');
-                    e.dataTransfer.effectAllowed = 'move';
-                    e.dataTransfer.setData('text/html', this.innerHTML);
-                });
-                
-                card.addEventListener('dragend', function(e) {
-                    this.classList.remove('dragging');
-                });
-            });
-            
-            columns.forEach(column => {
-                const cardsContainer = column.querySelector('.kanban-cards');
-                
-                cardsContainer.addEventListener('dragover', function(e) {
-                    e.preventDefault();
-                    e.dataTransfer.dropEffect = 'move';
-                });
-                
-                cardsContainer.addEventListener('drop', function(e) {
-                    e.preventDefault();
-                    
-                    const newStato = column.dataset.stato;
-                    const praticaId = draggedCard.dataset.praticaId;
-                    
-                    // In produzione, fare chiamata AJAX per aggiornare stato
-                    console.log(`Cambiando pratica ${praticaId} a stato ${newStato}`);
-                    
-                    // Per ora, ricarica pagina
-                    alert('Funzionalità in sviluppo - il cambio stato verrà salvato');
-                    // window.location.reload();
-                });
-            });
+    // Inizializza progress bars
+    document.addEventListener('DOMContentLoaded', function() {
+        // Progress bars
+        document.querySelectorAll('.progress-bar[data-progress]').forEach(bar => {
+            const progress = bar.dataset.progress;
+            bar.style.width = progress + '%';
         });
-        <?php endif; ?>
+        
+        // Kanban drag & drop
+        if ('<?= $viewMode ?>' === 'kanban') {
+            initKanbanDragDrop();
+        }
+    });
+    
+    function toggleView() {
+        const currentMode = '<?= $viewMode ?>';
+        const newMode = currentMode === 'kanban' ? 'list' : 'kanban';
+        window.location.href = `/crm/?action=pratiche&mode=${newMode}`;
+    }
+    
+    function viewPratica(id) {
+        window.location.href = `/crm/?action=pratiche&view=view&id=${id}`;
+    }
+    
+    // Kanban Drag & Drop
+    function initKanbanDragDrop() {
+        const cards = document.querySelectorAll('.kanban-card');
+        const columns = document.querySelectorAll('.kanban-cards');
+        
+        cards.forEach(card => {
+            card.addEventListener('dragstart', handleDragStart);
+            card.addEventListener('dragend', handleDragEnd);
+        });
+        
+        columns.forEach(column => {
+            column.addEventListener('dragover', handleDragOver);
+            column.addEventListener('drop', handleDrop);
+            column.addEventListener('dragenter', handleDragEnter);
+            column.addEventListener('dragleave', handleDragLeave);
+        });
+    }
+    
+    let draggedCard = null;
+    
+    function handleDragStart(e) {
+        draggedCard = this;
+        this.classList.add('dragging');
+        e.dataTransfer.effectAllowed = 'move';
+        e.dataTransfer.setData('text/html', this.innerHTML);
+    }
+    
+    function handleDragEnd(e) {
+        this.classList.remove('dragging');
+    }
+    
+    function handleDragOver(e) {
+        if (e.preventDefault) {
+            e.preventDefault();
+        }
+        e.dataTransfer.dropEffect = 'move';
+        return false;
+    }
+    
+    function handleDragEnter(e) {
+        this.classList.add('drag-over');
+    }
+    
+    function handleDragLeave(e) {
+        this.classList.remove('drag-over');
+    }
+    
+    function handleDrop(e) {
+        if (e.stopPropagation) {
+            e.stopPropagation();
+        }
+        
+        const column = this;
+        column.classList.remove('drag-over');
+        
+        if (draggedCard && draggedCard !== this) {
+            const praticaId = draggedCard.dataset.id;
+            const nuovoStato = column.id.replace('kanban-', '');
+            
+            // Aggiorna stato via AJAX
+            fetch('/crm/modules/pratiche/api/workflow.php', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({
+                    action: 'update_stato',
+                    pratica_id: praticaId,
+                    nuovo_stato: nuovoStato
+                })
+            })
+            .then(response => response.json())
+            .then(data => {
+                if (data.success) {
+                    column.appendChild(draggedCard);
+                    updateKanbanCounters();
+                } else {
+                    alert(data.message || 'Errore nel cambio stato');
+                    location.reload();
+                }
+            });
+        }
+        
+        return false;
+    }
+    
+    function updateKanbanCounters() {
+        document.querySelectorAll('.kanban-column').forEach(column => {
+            const count = column.querySelectorAll('.kanban-card').length;
+            const badge = column.querySelector('.badge');
+            if (badge) {
+                badge.textContent = count;
+            }
+        });
+    }
     </script>
 </body>
 </html>

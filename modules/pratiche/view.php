@@ -1,7 +1,7 @@
 <?php
 /**
- * modules/pratiche/view.php - Dashboard Pratica
- * USA SOLO CLASSI ESISTENTI IN DATEV-OPTIMAL.CSS
+ * modules/pratiche/view.php - Dashboard Pratica Ottimizzata
+ * ✅ VERSIONE PULITA CON CSS UNIFICATO
  */
 
 // Verifica router
@@ -41,11 +41,12 @@ $stats = [
 ];
 
 foreach ($tasks as $task) {
-    if(isset($stats[$task['stato']])) {
-        $stats[$task['stato']]++;
+    $stato = $task['stato'] ?? 'da_fare';
+    if(isset($stats[$stato])) {
+        $stats[$stato]++;
     }
-    $stats['ore_stimate'] += $task['ore_stimate'];
-    $stats['ore_lavorate'] += $task['ore_lavorate'];
+    $stats['ore_stimate'] += floatval($task['ore_stimate']);
+    $stats['ore_lavorate'] += floatval($task['ore_lavorate']);
 }
 
 $progressPercentuale = $stats['totali'] > 0 
@@ -68,7 +69,33 @@ $activities = $db->select("
 
 // Imposta variabili per header
 $pageTitle = $pratica_completa['titolo'];
-$pageIcon = PRATICHE_TYPES[$pratica_completa['tipo_pratica']]['icon'] ?? '📋';
+$pageIcon = '📋';
+
+// Funzione helper per badge stato task
+function getStatoTaskBadge($stato) {
+    $config = [
+        'da_fare' => ['class' => 'badge-secondary', 'label' => 'Da fare'],
+        'in_corso' => ['class' => 'badge-warning', 'label' => 'In corso'],
+        'completato' => ['class' => 'badge-success', 'label' => 'Completato'],
+        'bloccato' => ['class' => 'badge-danger', 'label' => 'Bloccato']
+    ];
+    
+    $stateConfig = $config[$stato] ?? $config['da_fare'];
+    return '<span class="badge ' . $stateConfig['class'] . '">' . $stateConfig['label'] . '</span>';
+}
+
+// Funzione helper per priorità
+function getPrioritaBadge($priorita) {
+    $config = [
+        'bassa' => ['class' => 'badge-info', 'icon' => '🔵'],
+        'media' => ['class' => 'badge-warning', 'icon' => '🟡'],
+        'alta' => ['class' => 'badge-danger', 'icon' => '🔴'],
+        'urgente' => ['class' => 'badge-danger', 'icon' => '🚨']
+    ];
+    
+    $prioConfig = $config[$priorita] ?? $config['media'];
+    return '<span class="badge ' . $prioConfig['class'] . '">' . $prioConfig['icon'] . ' ' . ucfirst($priorita) . '</span>';
+}
 ?>
 <!DOCTYPE html>
 <html lang="it">
@@ -76,311 +103,276 @@ $pageIcon = PRATICHE_TYPES[$pratica_completa['tipo_pratica']]['icon'] ?? '📋';
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title><?= htmlspecialchars($pratica_completa['titolo']) ?> - CRM Re.De</title>
-    <link rel="stylesheet" href="/crm/assets/css/design-system.css">
-    <link rel="stylesheet" href="/crm/assets/css/datev-optimal.css">
+    
+    <!-- ✅ CSS UNIFICATO -->
+    <link rel="stylesheet" href="/crm/assets/css/datev-koinos-unified.css">
 </head>
 <body>
     <div class="app-layout">
-        <?php 
-        // Include sidebar (barra laterale sinistra)
-        include $_SERVER['DOCUMENT_ROOT'] . '/crm/components/sidebar.php'; 
-        ?>
+        <!-- ✅ SIDEBAR CORRETTA -->
+        <?php include $_SERVER['DOCUMENT_ROOT'] . '/crm/components/navigation.php'; ?>
         
         <div class="content-wrapper">
-            <?php 
-            // Include header (barra orizzontale in alto)
-            include $_SERVER['DOCUMENT_ROOT'] . '/crm/components/header.php'; 
-            ?>
+            <!-- ✅ HEADER -->
+            <?php include $_SERVER['DOCUMENT_ROOT'] . '/crm/components/header.php'; ?>
             
             <main class="main-content">
                 <div class="container">
-                    <!-- Header Cliente -->
+                    <!-- Breadcrumb -->
+                    <nav class="mb-3" style="font-size: 0.875rem;">
+                        <a href="/crm/?action=dashboard" class="text-muted">Dashboard</a> /
+                        <a href="/crm/?action=pratiche" class="text-muted">Pratiche</a> /
+                        <span class="text-primary"><?= htmlspecialchars($pratica_completa['titolo']) ?></span>
+                    </nav>
+
+                    <!-- Header Pratica -->
                     <div class="card mb-3">
-                        <div class="card-body d-flex justify-content-between align-items-center">
-                            <div class="d-flex gap-3 align-items-center">
-                                <div style="width: 40px; height: 40px; background: var(--primary-green); color: white; border-radius: 50%; display: flex; align-items: center; justify-content: center;">
-                                    👤
-                                </div>
+                        <div class="card-body">
+                            <div class="d-flex justify-content-between align-items-start">
                                 <div>
-                                    <h2 style="font-size: 1.125rem; font-weight: 600; margin: 0;">
-                                        <?= htmlspecialchars($pratica_completa['cliente_nome']) ?>
-                                    </h2>
-                                    <div class="text-muted" style="font-size: 0.8125rem;">
-                                        <span>📞 <?= htmlspecialchars($pratica_completa['cliente_telefono'] ?? 'N/D') ?></span>
-                                        <span style="margin-left: 1rem;">📧 <?= htmlspecialchars($pratica_completa['cliente_email'] ?? 'N/D') ?></span>
+                                    <h1 class="h3 mb-2"><?= htmlspecialchars($pratica_completa['titolo']) ?></h1>
+                                    <div class="d-flex gap-2 align-items-center">
+                                        <span class="text-muted">Pratica #<?= str_pad($pratica['id'], 5, '0', STR_PAD_LEFT) ?></span>
+                                        <?= getPrioritaBadge($pratica_completa['priorita']) ?>
+                                        <span class="badge badge-info">
+                                            <?= htmlspecialchars($pratica_completa['tipo_pratica']) ?>
+                                        </span>
                                     </div>
                                 </div>
-                            </div>
-                            <div class="d-flex gap-2">
-                                <a href="/crm/?action=clienti&view=view&id=<?= $pratica_completa['cliente_id'] ?>" 
-                                   class="btn btn-secondary">
-                                    Scheda Cliente
-                                </a>
-                                <a href="mailto:<?= $pratica_completa['cliente_email'] ?>" 
-                                   class="btn btn-primary">
-                                    📧 Email
-                                </a>
+                                <div class="d-flex gap-2">
+                                    <a href="/crm/?action=pratiche&view=edit&id=<?= $pratica['id'] ?>" 
+                                       class="btn btn-secondary btn-sm">
+                                        ✏️ Modifica
+                                    </a>
+                                    <a href="/crm/?action=pratiche&view=task_manager&id=<?= $pratica['id'] ?>" 
+                                       class="btn btn-primary btn-sm">
+                                        📋 Gestione Task
+                                    </a>
+                                </div>
                             </div>
                         </div>
                     </div>
-                    
-                    <!-- Header Pratica -->
+
+                    <!-- Progress Bar -->
                     <div class="card mb-3">
-                        <div class="card-body d-flex justify-content-between align-items-center">
-                            <div>
-                                <h1 style="font-size: 1.25rem; font-weight: 600; margin: 0 0 0.25rem 0;">
-                                    <span style="color: <?= PRATICHE_TYPES[$pratica_completa['tipo_pratica']]['color'] ?>">
-                                        <?= PRATICHE_TYPES[$pratica_completa['tipo_pratica']]['icon'] ?>
-                                    </span>
-                                    <?= htmlspecialchars($pratica_completa['titolo']) ?>
-                                </h1>
-                                <div class="text-muted" style="font-size: 0.8125rem;">
-                                    <span>Pratica #<?= str_pad($pratica_completa['id'], 4, '0', STR_PAD_LEFT) ?></span>
-                                    <span style="margin: 0 0.5rem;">•</span>
-                                    <span><?= PRATICHE_STATI[$pratica_completa['stato']]['label'] ?></span>
-                                    <span style="margin: 0 0.5rem;">•</span>
-                                    <span>Operatore: <?= htmlspecialchars($pratica_completa['operatore_nome']) ?></span>
-                                    <?php if ($pratica_completa['data_scadenza']): ?>
-                                        <?php $scadenza = getScadenzaInfo($pratica_completa['data_scadenza']); ?>
-                                        <span style="margin: 0 0.5rem;">•</span>
-                                        <span class="<?= $scadenza['class'] ?>">
-                                            Scadenza: <?= $scadenza['text'] ?>
-                                        </span>
+                        <div class="card-body">
+                            <div class="d-flex justify-content-between mb-2">
+                                <span class="font-weight-600">Avanzamento</span>
+                                <span class="text-primary font-weight-600"><?= $progressPercentuale ?>%</span>
+                            </div>
+                            <div style="height: 8px; background: #e5e7eb; border-radius: 4px; overflow: hidden;">
+                                <div style="width: <?= $progressPercentuale ?>%; height: 100%; background: var(--primary-green); transition: width 0.3s;"></div>
+                            </div>
+                            <div class="d-flex justify-content-between mt-2 text-muted" style="font-size: 0.75rem;">
+                                <span><?= $stats['completati'] ?> completati</span>
+                                <span><?= $stats['totali'] ?> task totali</span>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Main Grid -->
+                    <div class="row">
+                        <!-- Colonna principale -->
+                        <div class="col-lg-8">
+                            <!-- Info Cliente -->
+                            <div class="card mb-3">
+                                <div class="card-header">
+                                    <h3 class="card-title">🏢 Cliente</h3>
+                                </div>
+                                <div class="card-body">
+                                    <div class="row">
+                                        <div class="col-md-6">
+                                            <p class="mb-1">
+                                                <strong>Ragione Sociale:</strong><br>
+                                                <?= htmlspecialchars($pratica_completa['cliente_nome']) ?>
+                                            </p>
+                                        </div>
+                                        <div class="col-md-6">
+                                            <p class="mb-1">
+                                                <strong>Codice Fiscale:</strong><br>
+                                                <?= htmlspecialchars($pratica_completa['cliente_cf'] ?? 'N/D') ?>
+                                            </p>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <!-- Lista Task -->
+                            <div class="card mb-3">
+                                <div class="card-header d-flex justify-content-between align-items-center">
+                                    <h3 class="card-title">📋 Task (<?= count($tasks) ?>)</h3>
+                                    <a href="/crm/?action=pratiche&view=task_manager&id=<?= $pratica['id'] ?>" 
+                                       class="btn btn-primary btn-sm">
+                                        ➕ Aggiungi Task
+                                    </a>
+                                </div>
+                                <div class="card-body">
+                                    <?php if (empty($tasks)): ?>
+                                        <p class="text-muted text-center">Nessun task presente</p>
+                                    <?php else: ?>
+                                        <div class="table-container">
+                                            <table class="table">
+                                                <thead>
+                                                    <tr>
+                                                        <th>Task</th>
+                                                        <th>Assegnato a</th>
+                                                        <th>Stato</th>
+                                                        <th>Ore</th>
+                                                        <th width="100">Azioni</th>
+                                                    </tr>
+                                                </thead>
+                                                <tbody>
+                                                    <?php foreach ($tasks as $task): ?>
+                                                        <tr>
+                                                            <td>
+                                                                <strong><?= htmlspecialchars($task['titolo']) ?></strong>
+                                                                <?php if ($task['descrizione']): ?>
+                                                                    <br><small class="text-muted">
+                                                                        <?= htmlspecialchars(substr($task['descrizione'], 0, 100)) ?>...
+                                                                    </small>
+                                                                <?php endif; ?>
+                                                            </td>
+                                                            <td><?= htmlspecialchars($task['assegnato_a'] ?? 'Non assegnato') ?></td>
+                                                            <td><?= getStatoTaskBadge($task['stato']) ?></td>
+                                                            <td>
+                                                                <small>
+                                                                    <?= number_format($task['ore_lavorate'], 1) ?> / 
+                                                                    <?= number_format($task['ore_stimate'], 1) ?>h
+                                                                </small>
+                                                            </td>
+                                                            <td>
+                                                                <a href="/crm/?action=pratiche&view=task_manager&id=<?= $pratica['id'] ?>&task_id=<?= $task['id'] ?>" 
+                                                                   class="btn btn-sm btn-secondary">
+                                                                    👁️
+                                                                </a>
+                                                            </td>
+                                                        </tr>
+                                                    <?php endforeach; ?>
+                                                </tbody>
+                                            </table>
+                                        </div>
                                     <?php endif; ?>
                                 </div>
                             </div>
-                            <div class="d-flex align-items-center gap-2" style="background: var(--gray-50); padding: 0.5rem 0.75rem; border-radius: 6px;">
-                                <div style="width: 120px; height: 6px; background: var(--gray-200); border-radius: 3px; overflow: hidden;">
-                                    <div style="height: 100%; background: var(--primary-green); width: <?= $progressPercentuale ?>%; transition: width 0.3s ease;"></div>
+
+                            <!-- Attività Recenti -->
+                            <div class="card">
+                                <div class="card-header">
+                                    <h3 class="card-title">📊 Attività Recenti</h3>
                                 </div>
-                                <span style="font-size: 0.8125rem; font-weight: 500;"><?= $progressPercentuale ?>%</span>
+                                <div class="card-body">
+                                    <?php if (empty($activities)): ?>
+                                        <p class="text-muted text-center">Nessuna attività recente</p>
+                                    <?php else: ?>
+                                        <div class="activity-list">
+                                            <?php foreach ($activities as $activity): ?>
+                                                <div class="activity-item">
+                                                    <div class="d-flex justify-content-between">
+                                                        <div>
+                                                            <strong><?= htmlspecialchars($activity['titolo']) ?></strong>
+                                                            <?php if ($activity['operatore']): ?>
+                                                                <br><small class="text-muted">
+                                                                    da <?= htmlspecialchars($activity['operatore']) ?>
+                                                                </small>
+                                                            <?php endif; ?>
+                                                        </div>
+                                                        <small class="text-muted">
+                                                            <?= date('d/m/Y H:i', strtotime($activity['data'])) ?>
+                                                        </small>
+                                                    </div>
+                                                </div>
+                                            <?php endforeach; ?>
+                                        </div>
+                                    <?php endif; ?>
+                                </div>
                             </div>
                         </div>
-                    </div>
-                    
-                    <!-- Layout 3 colonne -->
-                    <div class="d-grid gap-3" style="grid-template-columns: 1fr 2fr 1fr;">
-                        <!-- Colonna Sinistra: Statistiche e Azioni -->
-                        <div>
+
+                        <!-- Sidebar -->
+                        <div class="col-lg-4">
                             <!-- Statistiche -->
                             <div class="card mb-3">
                                 <div class="card-header">
-                                    <h3 style="font-size: 0.9375rem; font-weight: 600; margin: 0;">📊 Statistiche</h3>
+                                    <h3 class="card-title">📊 Statistiche</h3>
                                 </div>
                                 <div class="card-body">
-                                    <div class="d-grid gap-2" style="grid-template-columns: repeat(2, 1fr);">
-                                        <div class="text-center" style="padding: 0.75rem; background: var(--gray-50); border-radius: 6px;">
-                                            <span class="d-block" style="font-size: 1.25rem; font-weight: 600; color: var(--primary-green);">
-                                                <?= $stats['totali'] ?>
-                                            </span>
-                                            <span class="d-block text-muted" style="font-size: 0.75rem;">Task Totali</span>
+                                    <div class="stats-grid" style="grid-template-columns: 1fr 1fr;">
+                                        <div class="quick-stat-item">
+                                            <div class="quick-stat-value"><?= $stats['totali'] ?></div>
+                                            <div class="quick-stat-label">Task Totali</div>
                                         </div>
-                                        <div class="text-center" style="padding: 0.75rem; background: var(--gray-50); border-radius: 6px;">
-                                            <span class="d-block" style="font-size: 1.25rem; font-weight: 600; color: var(--primary-green);">
-                                                <?= $stats['completati'] ?>
-                                            </span>
-                                            <span class="d-block text-muted" style="font-size: 0.75rem;">Completati</span>
+                                        <div class="quick-stat-item">
+                                            <div class="quick-stat-value"><?= $stats['completati'] ?></div>
+                                            <div class="quick-stat-label">Completati</div>
                                         </div>
-                                        <div class="text-center" style="padding: 0.75rem; background: var(--gray-50); border-radius: 6px;">
-                                            <span class="d-block" style="font-size: 1.25rem; font-weight: 600; color: var(--primary-green);">
-                                                <?= number_format($stats['ore_stimate'], 1, ',', '.') ?>h
-                                            </span>
-                                            <span class="d-block text-muted" style="font-size: 0.75rem;">Ore Stimate</span>
+                                        <div class="quick-stat-item">
+                                            <div class="quick-stat-value">
+                                                <?= number_format($stats['ore_stimate'], 1) ?>h
+                                            </div>
+                                            <div class="quick-stat-label">Ore Stimate</div>
                                         </div>
-                                        <div class="text-center" style="padding: 0.75rem; background: var(--gray-50); border-radius: 6px;">
-                                            <span class="d-block" style="font-size: 1.25rem; font-weight: 600; color: var(--primary-green);">
-                                                <?= number_format($stats['ore_lavorate'], 1, ',', '.') ?>h
-                                            </span>
-                                            <span class="d-block text-muted" style="font-size: 0.75rem;">Ore Lavorate</span>
+                                        <div class="quick-stat-item">
+                                            <div class="quick-stat-value">
+                                                <?= number_format($stats['ore_lavorate'], 1) ?>h
+                                            </div>
+                                            <div class="quick-stat-label">Ore Lavorate</div>
                                         </div>
                                     </div>
                                 </div>
                             </div>
-                            
-                            <!-- Azioni Rapide -->
+
+                            <!-- Info Pratica -->
                             <div class="card mb-3">
                                 <div class="card-header">
-                                    <h3 style="font-size: 0.9375rem; font-weight: 600; margin: 0;">⚡ Azioni Rapide</h3>
+                                    <h3 class="card-title">ℹ️ Dettagli Pratica</h3>
+                                </div>
+                                <div class="card-body">
+                                    <dl class="mb-0">
+                                        <dt>Data Apertura</dt>
+                                        <dd class="mb-2"><?= date('d/m/Y', strtotime($pratica_completa['data_apertura'])) ?></dd>
+                                        
+                                        <?php if ($pratica_completa['data_scadenza']): ?>
+                                            <dt>Data Scadenza</dt>
+                                            <dd class="mb-2">
+                                                <?= date('d/m/Y', strtotime($pratica_completa['data_scadenza'])) ?>
+                                                <?php
+                                                $giorni = (strtotime($pratica_completa['data_scadenza']) - time()) / 86400;
+                                                if ($giorni < 0): ?>
+                                                    <span class="badge badge-danger">Scaduta</span>
+                                                <?php elseif ($giorni <= 3): ?>
+                                                    <span class="badge badge-warning">In scadenza</span>
+                                                <?php endif; ?>
+                                            </dd>
+                                        <?php endif; ?>
+                                        
+                                        <dt>Operatore Responsabile</dt>
+                                        <dd class="mb-2"><?= htmlspecialchars($pratica_completa['operatore_nome'] ?? 'Non assegnato') ?></dd>
+                                        
+                                        <dt>Stato</dt>
+                                        <dd><?= getStatoTaskBadge($pratica_completa['stato']) ?></dd>
+                                    </dl>
+                                </div>
+                            </div>
+
+                            <!-- Azioni Rapide -->
+                            <div class="card">
+                                <div class="card-header">
+                                    <h3 class="card-title">⚡ Azioni Rapide</h3>
                                 </div>
                                 <div class="card-body">
                                     <div class="d-grid gap-2">
-                                        <a href="/crm/?action=pratiche&view=task_manager&id=<?= $pratica['id'] ?>" 
-                                           class="btn btn-primary text-center">
-                                            📋 Gestisci Task
-                                        </a>
                                         <a href="/crm/?action=pratiche&view=tracking&id=<?= $pratica['id'] ?>" 
-                                           class="btn btn-secondary text-center">
-                                            ⏱️ Time Tracking
-                                        </a>
-                                        <a href="/crm/?action=pratiche&view=edit&id=<?= $pratica['id'] ?>" 
-                                           class="btn btn-secondary text-center">
-                                            ✏️ Modifica Pratica
+                                           class="btn btn-secondary">
+                                            ⏱️ Tracking Tempo
                                         </a>
                                         <a href="/crm/?action=pratiche&view=workflow&id=<?= $pratica['id'] ?>" 
-                                           class="btn btn-secondary text-center">
+                                           class="btn btn-secondary">
                                             🔄 Cambia Stato
                                         </a>
-                                        <a href="#" class="btn btn-secondary text-center">
-                                            📧 Email Cliente
-                                        </a>
-                                        <?php if ($pratica_completa['stato'] === 'completata'): ?>
-                                        <a href="#" class="btn btn-primary text-center">
-                                            💰 Genera Fattura
-                                        </a>
-                                        <?php endif; ?>
+                                        <button onclick="window.print()" class="btn btn-secondary">
+                                            🖨️ Stampa Pratica
+                                        </button>
                                     </div>
-                                </div>
-                            </div>
-                            
-                            <!-- Note (se presenti) -->
-                            <?php if (!empty($pratica_completa['descrizione'])): ?>
-                            <div class="card">
-                                <div class="card-header">
-                                    <h3 style="font-size: 0.9375rem; font-weight: 600; margin: 0;">📝 Note</h3>
-                                </div>
-                                <div class="card-body">
-                                    <p class="text-muted mb-0" style="font-size: 0.8125rem;">
-                                        <?= nl2br(htmlspecialchars($pratica_completa['descrizione'])) ?>
-                                    </p>
-                                </div>
-                            </div>
-                            <?php endif; ?>
-                        </div>
-                        
-                        <!-- Colonna Centrale: Task -->
-                        <div>
-                            <div class="card">
-                                <div class="card-header d-flex justify-content-between align-items-center">
-                                    <h3 style="font-size: 0.9375rem; font-weight: 600; margin: 0;">📋 Task (<?= count($tasks) ?>)</h3>
-                                    <a href="/crm/?action=pratiche&view=task_manager&id=<?= $pratica['id'] ?>" 
-                                       class="btn btn-primary">
-                                        Gestisci
-                                    </a>
-                                </div>
-                                <div class="card-body" style="padding: 0;">
-                                    <div style="max-height: 400px; overflow-y: auto;">
-                                        <?php foreach ($tasks as $task): ?>
-                                        <div style="padding: 0.625rem 0.75rem; border-bottom: 1px solid var(--gray-100); display: flex; align-items: center; gap: 0.75rem;">
-                                            <div style="width: 20px; height: 20px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 0.75rem; flex-shrink: 0; background: <?= $task['stato'] == 'completato' ? '#d1fae5' : ($task['stato'] == 'in_corso' ? '#dbeafe' : '#fef3c7') ?>;">
-                                                <?= TASK_STATI[$task['stato']]['icon'] ?>
-                                            </div>
-                                            <div style="flex: 1; min-width: 0;">
-                                                <div style="font-size: 0.8125rem; font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">
-                                                    <?= htmlspecialchars($task['titolo']) ?>
-                                                </div>
-                                                <div class="text-muted" style="font-size: 0.75rem;">
-                                                    <?php if ($task['ore_stimate'] > 0): ?>
-                                                        ⏱️ <?= number_format($task['ore_stimate'], 1, ',', '.') ?>h
-                                                    <?php endif; ?>
-                                                    <?php if ($task['assegnato_a']): ?>
-                                                        • 👤 <?= htmlspecialchars($task['assegnato_a']) ?>
-                                                    <?php endif; ?>
-                                                </div>
-                                            </div>
-                                            <div class="d-flex gap-1">
-                                                <?php if ($task['stato'] !== 'completato'): ?>
-                                                <button class="btn btn-secondary" 
-                                                        onclick="startTask(<?= $task['id'] ?>)"
-                                                        title="Inizia Task"
-                                                        style="padding: 0.25rem 0.5rem; font-size: 0.75rem;">
-                                                    ▶️
-                                                </button>
-                                                <?php endif; ?>
-                                            </div>
-                                        </div>
-                                        <?php endforeach; ?>
-                                        
-                                        <?php if (empty($tasks)): ?>
-                                        <div class="text-center" style="padding: 2rem;">
-                                            <p class="text-muted">Nessun task presente</p>
-                                            <a href="/crm/?action=pratiche&view=task_manager&id=<?= $pratica['id'] ?>" 
-                                               class="btn btn-primary">
-                                                ➕ Aggiungi Task
-                                            </a>
-                                        </div>
-                                        <?php endif; ?>
-                                    </div>
-                                </div>
-                            </div>
-                        </div>
-                        
-                        <!-- Colonna Destra: Timeline e Documenti -->
-                        <div>
-                            <!-- Timeline Attività -->
-                            <div class="card mb-3">
-                                <div class="card-header">
-                                    <h3 style="font-size: 0.9375rem; font-weight: 600; margin: 0;">🕒 Attività Recenti</h3>
-                                </div>
-                                <div class="card-body">
-                                    <div style="position: relative; padding-left: 1.5rem;">
-                                        <?php foreach (array_slice($activities, 0, 5) as $index => $activity): ?>
-                                        <div style="position: relative; padding-bottom: 0.75rem;">
-                                            <div style="position: absolute; left: -18px; top: 0.25rem; width: 12px; height: 12px; background: white; border: 2px solid var(--primary-green); border-radius: 50%;"></div>
-                                            <?php if ($index < count($activities) - 1): ?>
-                                            <div style="position: absolute; left: -12px; top: 1rem; bottom: 0; width: 2px; background: var(--gray-200);"></div>
-                                            <?php endif; ?>
-                                            <div style="font-size: 0.75rem; color: var(--gray-600);">
-                                                <?= htmlspecialchars($activity['titolo']) ?>
-                                                <div style="font-size: 0.6875rem; color: var(--gray-400);">
-                                                    <?= date('d/m H:i', strtotime($activity['data'])) ?>
-                                                    <?php if ($activity['operatore']): ?>
-                                                        • <?= htmlspecialchars($activity['operatore']) ?>
-                                                    <?php endif; ?>
-                                                </div>
-                                            </div>
-                                        </div>
-                                        <?php endforeach; ?>
-                                        
-                                        <?php if (empty($activities)): ?>
-                                        <p class="text-center text-muted">
-                                            Nessuna attività recente
-                                        </p>
-                                        <?php endif; ?>
-                                    </div>
-                                </div>
-                            </div>
-                            
-                            <!-- Documenti -->
-                            <div class="card mb-3">
-                                <div class="card-header d-flex justify-content-between align-items-center">
-                                    <h3 style="font-size: 0.9375rem; font-weight: 600; margin: 0;">📎 Documenti</h3>
-                                    <button class="btn btn-primary" style="padding: 0.25rem 0.5rem; font-size: 0.75rem;">
-                                        ➕ Upload
-                                    </button>
-                                </div>
-                                <div class="card-body">
-                                    <p class="text-center text-muted">
-                                        Nessun documento caricato
-                                    </p>
-                                </div>
-                            </div>
-                            
-                            <!-- Info Pratica -->
-                            <div class="card">
-                                <div class="card-header">
-                                    <h3 style="font-size: 0.9375rem; font-weight: 600; margin: 0;">ℹ️ Informazioni</h3>
-                                </div>
-                                <div class="card-body">
-                                    <dl style="font-size: 0.75rem; margin: 0;">
-                                        <dt style="font-weight: 500; color: var(--gray-600);">Creata il:</dt>
-                                        <dd style="margin: 0 0 0.5rem 0; color: var(--gray-900);">
-                                            <?= date('d/m/Y H:i', strtotime($pratica_completa['created_at'])) ?>
-                                        </dd>
-                                        
-                                        <?php if ($pratica_completa['template_id']): ?>
-                                        <dt style="font-weight: 500; color: var(--gray-600);">Template:</dt>
-                                        <dd style="margin: 0 0 0.5rem 0; color: var(--gray-900);">
-                                            Sì (ID: <?= $pratica_completa['template_id'] ?>)
-                                        </dd>
-                                        <?php endif; ?>
-                                        
-                                        <dt style="font-weight: 500; color: var(--gray-600);">Priorità:</dt>
-                                        <dd style="margin: 0;">
-                                            <span class="status-badge status-<?= $pratica_completa['priorita'] === 'alta' ? 'warning' : 'active' ?>">
-                                                <?= PRATICHE_PRIORITA[$pratica_completa['priorita']]['label'] ?>
-                                            </span>
-                                        </dd>
-                                    </dl>
                                 </div>
                             </div>
                         </div>
@@ -389,15 +381,5 @@ $pageIcon = PRATICHE_TYPES[$pratica_completa['tipo_pratica']]['icon'] ?? '📋';
             </main>
         </div>
     </div>
-    
-    <script>
-        function startTask(taskId) {
-            window.location.href = `/crm/?action=pratiche&view=tracking&id=<?= $pratica['id'] ?>&task=${taskId}`;
-        }
-        
-        setTimeout(() => {
-            location.reload();
-        }, 60000);
-    </script>
 </body>
 </html>

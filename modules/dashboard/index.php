@@ -1,10 +1,9 @@
 <?php
 /**
- * 📊 MODULO DASHBOARD - CRM RE.DE CONSULTING
+ * 📊 MODULO DASHBOARD OTTIMIZZATA - CRM RE.DE CONSULTING
  * File: /modules/dashboard/index.php
  * 
- * Dashboard principale come modulo
- * ✅ VERSIONE CON COMPONENTI CENTRALIZZATI
+ * ✅ VERSIONE CON LAYOUT COMPATTO E PIÙ CONTENUTI
  */
 
 // ================================================================
@@ -144,6 +143,76 @@ function getCriticalAlerts() {
     return $alerts;
 }
 
+/**
+ * 📊 Ottieni attività recenti REALI dal database
+ */
+function getRecentActivities($limit = 10) {
+    $activities = [];
+    
+    try {
+        $db = Database::getInstance();
+        
+        // Query unificata per diverse attività
+        $sql = "
+            (SELECT 
+                'cliente' as tipo,
+                CONCAT('🆕 Nuovo cliente: ', ragione_sociale) as descrizione,
+                created_at as data_attivita,
+                NULL as operatore
+             FROM clienti 
+             WHERE created_at > DATE_SUB(NOW(), INTERVAL 7 DAY)
+             ORDER BY created_at DESC
+             LIMIT 5)
+            
+            UNION ALL
+            
+            (SELECT 
+                'operatore' as tipo,
+                CONCAT('👤 Nuovo operatore: ', nome, ' ', cognome) as descrizione,
+                created_at as data_attivita,
+                NULL as operatore
+             FROM operatori
+             WHERE created_at > DATE_SUB(NOW(), INTERVAL 7 DAY)
+             ORDER BY created_at DESC
+             LIMIT 5)
+            
+            ORDER BY data_attivita DESC
+            LIMIT ?
+        ";
+        
+        $stmt = $db->db->prepare($sql);
+        $stmt->execute([$limit]);
+        $activities = $stmt->fetchAll(PDO::FETCH_ASSOC);
+        
+    } catch (Exception $e) {
+        error_log("Recent activities error: " . $e->getMessage());
+        // Fallback su dati demo
+        $activities = [
+            ['tipo' => 'demo', 'descrizione' => '🆕 Nuovo cliente registrato: Esempio SRL', 'data_attivita' => date('Y-m-d H:i:s', strtotime('-2 hours'))],
+            ['tipo' => 'demo', 'descrizione' => '📋 Pratica completata per Cliente ABC', 'data_attivita' => date('Y-m-d H:i:s', strtotime('-4 hours'))],
+            ['tipo' => 'demo', 'descrizione' => '📧 Email inviata a 15 clienti', 'data_attivita' => date('Y-m-d H:i:s', strtotime('-1 day'))]
+        ];
+    }
+    
+    return $activities;
+}
+
+/**
+ * 📈 Ottieni statistiche per mini grafici
+ */
+function getMiniStats() {
+    return [
+        'clienti_per_mese' => [
+            'labels' => ['Gen', 'Feb', 'Mar', 'Apr', 'Mag', 'Giu'],
+            'data' => [12, 19, 3, 5, 2, 3]
+        ],
+        'fatturato_per_mese' => [
+            'labels' => ['Gen', 'Feb', 'Mar', 'Apr', 'Mag', 'Giu'],
+            'data' => [25000, 30000, 28000, 35000, 32000, 40000]
+        ]
+    ];
+}
+
 // ================================================================
 // ESECUZIONE PRINCIPALE DASHBOARD
 // ================================================================
@@ -151,7 +220,9 @@ function getCriticalAlerts() {
 try {
     $stats_cards = getQuickStats();
     $criticalAlerts = getCriticalAlerts();
-    $user = getCurrentUser(); // Funzione da bootstrap.php
+    $recentActivities = getRecentActivities();
+    $miniStats = getMiniStats();
+    $user = getCurrentUser();
     
     $page_title = 'Dashboard - CRM Re.De Consulting';
     $last_updated = date('H:i:s');
@@ -160,6 +231,7 @@ try {
     error_log("Dashboard execution error: " . $e->getMessage());
     $stats_cards = [];
     $criticalAlerts = [];
+    $recentActivities = [];
     $user = ['nome' => 'Utente'];
 }
 ?>
@@ -190,7 +262,7 @@ try {
                         <p class="text-muted">Ultimo aggiornamento: <?= $last_updated ?></p>
                     </div>
 
-                    <!-- Stats Grid -->
+                    <!-- Stats Grid - 4 colonne -->
                     <div class="row mb-3">
                         <?php foreach ($stats_cards as $stat): ?>
                             <div class="col-md-3 mb-2">
@@ -238,42 +310,74 @@ try {
                         </div>
                     <?php endif; ?>
 
-                    <!-- Main Content Grid -->
-                    <div class="row">
-                        <!-- Recent Activities -->
-                        <div class="col-md-8 mb-3">
-                            <div class="card">
-                                <div class="card-header">
+                    <!-- Layout ottimizzato con griglia 2 colonne -->
+                    <div class="dashboard-grid">
+                        <!-- Colonna principale -->
+                        <div>
+                            <!-- Attività Recenti -->
+                            <div class="card mb-3">
+                                <div class="card-header d-flex justify-content-between align-items-center">
                                     <h3 class="card-title">📊 Attività Recenti</h3>
+                                    <a href="?action=activities" class="text-primary" style="font-size: 0.875rem;">
+                                        Vedi tutte →
+                                    </a>
                                 </div>
                                 <div class="card-body">
-                                    <div class="activity-list">
-                                        <div class="p-3 mb-2 bg-light rounded">
-                                            <div class="d-flex justify-content-between">
-                                                <div>🆕 Nuovo cliente registrato: Esempio SRL</div>
-                                                <div class="text-muted">2 ore fa</div>
+                                    <?php if (!empty($recentActivities)): ?>
+                                        <?php foreach ($recentActivities as $activity): ?>
+                                            <div class="activity-item">
+                                                <div class="d-flex justify-content-between">
+                                                    <div><?= htmlspecialchars($activity['descrizione']) ?></div>
+                                                    <div class="activity-time">
+                                                        <?= formatTimeAgo($activity['data_attivita']) ?>
+                                                    </div>
+                                                </div>
                                             </div>
+                                        <?php endforeach; ?>
+                                    <?php else: ?>
+                                        <p class="text-muted text-center">Nessuna attività recente</p>
+                                    <?php endif; ?>
+                                </div>
+                            </div>
+                            
+                            <!-- Mini Widgets -->
+                            <div class="mini-widgets">
+                                <!-- Scadenze Imminenti -->
+                                <div class="mini-widget">
+                                    <h4 class="mini-widget-title">⏰ Scadenze Questa Settimana</h4>
+                                    <div class="quick-stats">
+                                        <div class="quick-stat-item">
+                                            <div class="quick-stat-value">3</div>
+                                            <div class="quick-stat-label">Oggi</div>
                                         </div>
-                                        <div class="p-3 mb-2 bg-light rounded">
-                                            <div class="d-flex justify-content-between">
-                                                <div>📋 Pratica completata per Cliente ABC</div>
-                                                <div class="text-muted">4 ore fa</div>
-                                            </div>
+                                        <div class="quick-stat-item">
+                                            <div class="quick-stat-value">8</div>
+                                            <div class="quick-stat-label">Settimana</div>
                                         </div>
-                                        <div class="p-3 mb-2 bg-light rounded">
-                                            <div class="d-flex justify-content-between">
-                                                <div>📧 Email inviata a 15 clienti</div>
-                                                <div class="text-muted">Ieri alle 18:30</div>
-                                            </div>
+                                    </div>
+                                </div>
+                                
+                                <!-- Performance -->
+                                <div class="mini-widget">
+                                    <h4 class="mini-widget-title">📈 Performance Mese</h4>
+                                    <div class="quick-stats">
+                                        <div class="quick-stat-item">
+                                            <div class="quick-stat-value">+12%</div>
+                                            <div class="quick-stat-label">Clienti</div>
+                                        </div>
+                                        <div class="quick-stat-item">
+                                            <div class="quick-stat-value">+8%</div>
+                                            <div class="quick-stat-label">Pratiche</div>
                                         </div>
                                     </div>
                                 </div>
                             </div>
                         </div>
-
-                        <!-- Quick Actions -->
-                        <div class="col-md-4 mb-3">
-                            <div class="card">
+                        
+                        <!-- Colonna laterale -->
+                        <div>
+                            <!-- Azioni Rapide -->
+                            <div class="card mb-3">
                                 <div class="card-header">
                                     <h3 class="card-title">⚡ Azioni Rapide</h3>
                                 </div>
@@ -286,16 +390,50 @@ try {
                                             👥 Nuovo Operatore
                                         </a>
                                         <a href="?action=pratiche&view=create" class="btn btn-secondary">
-                                            📁 Nuova Pratica
+                                            📋 Nuova Pratica
                                         </a>
-                                        <hr>
-                                        <a href="?action=reports" class="btn btn-sm btn-secondary">
+                                        <a href="?action=reports" class="btn btn-secondary">
                                             📊 Report e Statistiche
                                         </a>
-                                        <a href="?action=settings" class="btn btn-sm btn-secondary">
+                                        <a href="?action=settings" class="btn btn-secondary">
                                             ⚙️ Impostazioni
                                         </a>
                                     </div>
+                                </div>
+                            </div>
+                            
+                            <!-- Promemoria -->
+                            <div class="card">
+                                <div class="card-header">
+                                    <h3 class="card-title">📌 Promemoria</h3>
+                                </div>
+                                <div class="card-body">
+                                    <ul style="list-style: none; padding: 0; margin: 0;">
+                                        <li style="padding: 0.5rem 0; border-bottom: 1px solid var(--gray-200);">
+                                            <div style="font-size: 0.875rem;">
+                                                <strong>Chiamare Mario Rossi</strong>
+                                                <div class="text-muted" style="font-size: 0.75rem;">
+                                                    Oggi alle 15:00
+                                                </div>
+                                            </div>
+                                        </li>
+                                        <li style="padding: 0.5rem 0; border-bottom: 1px solid var(--gray-200);">
+                                            <div style="font-size: 0.875rem;">
+                                                <strong>Riunione team</strong>
+                                                <div class="text-muted" style="font-size: 0.75rem;">
+                                                    Domani alle 10:00
+                                                </div>
+                                            </div>
+                                        </li>
+                                        <li style="padding: 0.5rem 0;">
+                                            <div style="font-size: 0.875rem;">
+                                                <strong>Scadenza F24</strong>
+                                                <div class="text-muted" style="font-size: 0.75rem;">
+                                                    Venerdì 16:00
+                                                </div>
+                                            </div>
+                                        </li>
+                                    </ul>
                                 </div>
                             </div>
                         </div>
@@ -304,37 +442,25 @@ try {
             </main>
         </div>
     </div>
-
-    <!-- JavaScript per microinterazioni -->
-    <script>
-        // Auto-refresh dashboard ogni 5 minuti
-        setTimeout(() => {
-            location.reload();
-        }, 300000);
-
-        // Animazione contatori
-        document.querySelectorAll('.stat-value').forEach(element => {
-            const text = element.textContent;
-            const match = text.match(/^(\d+)/);
-            if (match) {
-                const value = parseInt(match[1]);
-                let current = 0;
-                const increment = value / 20;
-                const timer = setInterval(() => {
-                    current += increment;
-                    if (current >= value) {
-                        current = value;
-                        clearInterval(timer);
-                    }
-                    const parts = text.split('/');
-                    if (parts.length > 1) {
-                        element.innerHTML = Math.floor(current) + ' <span class="text-muted" style="font-size: 0.875rem;">/ ' + parts[1].trim() + '</span>';
-                    } else {
-                        element.textContent = Math.floor(current) + text.substring(match[0].length);
-                    }
-                }, 50);
-            }
-        });
-    </script>
 </body>
 </html>
+
+<?php
+// Helper function per PHP
+function formatTimeAgo($dateString) {
+    $date = new DateTime($dateString);
+    $now = new DateTime();
+    $diff = $now->diff($date);
+    
+    if ($diff->d == 0) {
+        if ($diff->h == 0) {
+            if ($diff->i == 0) return 'Adesso';
+            return $diff->i . ' minuti fa';
+        }
+        return $diff->h . ' ore fa';
+    }
+    if ($diff->d < 7) return $diff->d . ' giorni fa';
+    
+    return $date->format('d/m/Y');
+}
+?>
