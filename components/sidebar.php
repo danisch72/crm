@@ -2,14 +2,17 @@
 /**
  * components/sidebar.php - Sidebar Laterale CRM Re.De Consulting
  * 
- * ✅ SIDEBAR PROFESSIONALE FISSA A SINISTRA
+ * ✅ SIDEBAR FISSA (NO COLLAPSE)
+ * ✅ DESIGN PROFESSIONALE DATEV KOINOS
+ * ✅ NAVIGAZIONE COMPLETA E MODULARE
+ * ✅ NESSUNA SCROLLBAR
  * 
  * Features:
- * - Colori professionali ad alto contrasto
- * - Design pulito stile CRM moderni
- * - Hover states eleganti
- * - Logo RE.DE integrato
- * - Navigazione chiara e leggibile
+ * - Menu principale con icone
+ * - Sezione admin condizionale
+ * - Badge contatori
+ * - Evidenziazione pagina attiva
+ * - Logo RE.DE
  */
 
 // Verifica autenticazione
@@ -24,24 +27,61 @@ if (!isset($sessionInfo) || empty($sessionInfo)) {
     }
     
     $sessionInfo = [
-        'nome_completo' => $_SESSION['nome'] . ' ' . $_SESSION['cognome'],
-        'is_admin' => $_SESSION['is_admin'] ?? false
+        'nome_completo' => $_SESSION['nome'] ?? 'Utente',
+        'nome' => $_SESSION['nome'] ?? '',
+        'cognome' => $_SESSION['cognome'] ?? '',
+        'is_admin' => $_SESSION['is_admin'] ?? false,
+        'operatore_id' => $_SESSION['user_id'] ?? 0
     ];
 }
 
 // Determina pagina attiva
 $currentAction = $_GET['action'] ?? 'dashboard';
 $currentView = $_GET['view'] ?? '';
+
+// Contatori per badge (in produzione usare query DB reali)
+$clientiAttivi = 3;
+$praticheAttive = 3;
+$scadenzeOggi = 0;
 ?>
 
-<!-- Sidebar Professionale -->
+<!-- Sidebar Styles -->
+<style>
+/* Sidebar Navigation più compatta */
+.sidebar-nav {
+    flex: 1;
+    padding: 0.25rem 0;
+}
+
+/* Nav badge urgent con animazione */
+.nav-badge.urgent {
+    background: #ff4444;
+    color: white;
+    font-weight: 700;
+    animation: pulse 2s infinite;
+}
+
+@keyframes pulse {
+    0% { opacity: 1; }
+    50% { opacity: 0.7; }
+    100% { opacity: 1; }
+}
+</style>
+
+<!-- Sidebar Laterale -->
 <aside class="sidebar" id="mainSidebar">
     <!-- Header con Logo -->
     <div class="sidebar-header">
-        <img src="/crm/assets/images/logo-rede.png" 
-             alt="RE.DE Consulting" 
-             class="sidebar-logo">
-        <span class="sidebar-title">CRM</span>
+        <div class="logo-container">
+            <img src="/crm/assets/images/logo-rede.png" 
+                 alt="RE.DE Consulting" 
+                 class="sidebar-logo"
+                 onerror="this.style.display='none'; document.getElementById('logo-text').style.display='flex';">
+            <div id="logo-text" class="logo-text" style="display:none;">
+                <span class="logo-rede">RE.DE</span>
+                <span class="logo-consulting">CONSULTING</span>
+            </div>
+        </div>
     </div>
     
     <!-- Navigazione Principale -->
@@ -69,11 +109,9 @@ $currentView = $_GET['view'] ?? '';
                    class="nav-link <?= $currentAction === 'clienti' ? 'active' : '' ?>">
                     <span class="nav-icon">🏢</span>
                     <span class="nav-text">Clienti</span>
-                    <?php
-                    // Badge contatore (esempio)
-                    $clientiAttivi = 127; // In produzione: query DB
-                    ?>
-                    <span class="nav-badge"><?= $clientiAttivi ?></span>
+                    <?php if ($clientiAttivi > 0): ?>
+                        <span class="nav-badge"><?= $clientiAttivi ?></span>
+                    <?php endif; ?>
                 </a>
             </li>
             
@@ -82,6 +120,9 @@ $currentView = $_GET['view'] ?? '';
                    class="nav-link <?= $currentAction === 'pratiche' ? 'active' : '' ?>">
                     <span class="nav-icon">📋</span>
                     <span class="nav-text">Pratiche</span>
+                    <?php if ($praticheAttive > 0): ?>
+                        <span class="nav-badge"><?= $praticheAttive ?></span>
+                    <?php endif; ?>
                 </a>
             </li>
             
@@ -90,12 +131,8 @@ $currentView = $_GET['view'] ?? '';
                    class="nav-link <?= $currentAction === 'scadenze' ? 'active' : '' ?>">
                     <span class="nav-icon">⏰</span>
                     <span class="nav-text">Scadenze</span>
-                    <?php
-                    // Badge scadenze imminenti
-                    $scadenzeOggi = 3; // In produzione: query DB
-                    if ($scadenzeOggi > 0):
-                    ?>
-                    <span class="nav-badge urgent"><?= $scadenzeOggi ?></span>
+                    <?php if ($scadenzeOggi > 0): ?>
+                        <span class="nav-badge urgent"><?= $scadenzeOggi ?></span>
                     <?php endif; ?>
                 </a>
             </li>
@@ -123,6 +160,14 @@ $currentView = $_GET['view'] ?? '';
                         <span class="nav-text">Report</span>
                     </a>
                 </li>
+                
+                <li class="nav-item">
+                    <a href="/crm/?action=backup" 
+                       class="nav-link <?= $currentAction === 'backup' ? 'active' : '' ?>">
+                        <span class="nav-icon">💾</span>
+                        <span class="nav-text">Backup</span>
+                    </a>
+                </li>
             </ul>
         </div>
         <?php endif; ?>
@@ -130,9 +175,62 @@ $currentView = $_GET['view'] ?? '';
     
     <!-- Footer Sidebar -->
     <div class="sidebar-footer">
-        <a href="/crm/logout.php" class="nav-link nav-logout">
+        <div class="user-info-mini">
+            <div class="user-avatar-mini">
+                <?= strtoupper(substr($sessionInfo['nome'] ?? 'U', 0, 1) . substr($sessionInfo['cognome'] ?? '', 0, 1)) ?>
+            </div>
+            <div class="user-details-mini">
+                <div class="user-name-mini"><?= htmlspecialchars($sessionInfo['nome_completo']) ?></div>
+                <div class="user-role-mini"><?= $sessionInfo['is_admin'] ? 'Admin' : 'Operatore' ?></div>
+            </div>
+        </div>
+        
+        <a href="/crm/auth/logout.php" class="nav-link nav-logout">
             <span class="nav-icon">🚪</span>
             <span class="nav-text">Esci</span>
         </a>
     </div>
 </aside>
+
+<!-- Overlay per mobile -->
+<div class="sidebar-overlay" id="sidebarOverlay"></div>
+
+<!-- JavaScript Sidebar -->
+<script>
+// Funzione per mobile
+window.toggleMobileSidebar = function() {
+    const sidebar = document.getElementById('mainSidebar');
+    const overlay = document.getElementById('sidebarOverlay');
+    
+    sidebar.classList.toggle('sidebar-mobile-open');
+    
+    if (sidebar.classList.contains('sidebar-mobile-open')) {
+        overlay.style.display = 'block';
+    } else {
+        overlay.style.display = 'none';
+    }
+};
+
+document.addEventListener('DOMContentLoaded', function() {
+    const sidebar = document.getElementById('mainSidebar');
+    const overlay = document.getElementById('sidebarOverlay');
+    
+    // Click su overlay chiude sidebar mobile
+    if (overlay) {
+        overlay.addEventListener('click', function() {
+            sidebar.classList.remove('sidebar-mobile-open');
+            overlay.style.display = 'none';
+        });
+    }
+    
+    // Chiudi sidebar su mobile quando si clicca un link
+    if (window.innerWidth < 768) {
+        document.querySelectorAll('.nav-link').forEach(link => {
+            link.addEventListener('click', function() {
+                sidebar.classList.remove('sidebar-mobile-open');
+                if (overlay) overlay.style.display = 'none';
+            });
+        });
+    }
+});
+</script>

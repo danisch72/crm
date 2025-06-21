@@ -2,14 +2,15 @@
 /**
  * components/header.php - Header Orizzontale CRM Re.De Consulting
  * 
- * ✅ HEADER PROFESSIONALE CON TIMER E USER INFO
+ * ✅ HEADER SENZA TOGGLE SIDEBAR (RIMOSSA)
+ * ✅ MOBILE MENU BUTTON SOLO SU MOBILE
+ * ✅ DESIGN PROFESSIONALE DATEV KOINOS
  * 
  * Features:
- * - Titolo pagina dinamico
  * - Timer sessione lavoro
  * - Info utente e avatar
- * - Toggle sidebar mobile
- * - Design minimalista professionale
+ * - Menu dropdown utente
+ * - Mobile menu solo su mobile
  */
 
 // Verifica variabili necessarie
@@ -21,8 +22,26 @@ if (!isset($pageIcon)) {
     $pageIcon = '🏠';
 }
 
+// Verifica sessione
+if (!isset($sessionInfo) || empty($sessionInfo)) {
+    if (session_status() === PHP_SESSION_NONE) {
+        session_start();
+    }
+    
+    $sessionInfo = [
+        'nome_completo' => $_SESSION['nome'] ?? 'Utente',
+        'nome' => $_SESSION['nome'] ?? '',
+        'cognome' => $_SESSION['cognome'] ?? '',
+        'is_admin' => $_SESSION['is_admin'] ?? false,
+        'operatore_id' => $_SESSION['user_id'] ?? 0
+    ];
+}
+
 // Calcola tempo sessione
-$sessionStart = $_SESSION['session_start'] ?? time();
+if (!isset($_SESSION['session_start'])) {
+    $_SESSION['session_start'] = time();
+}
+$sessionStart = $_SESSION['session_start'];
 $sessionDuration = time() - $sessionStart;
 $hours = floor($sessionDuration / 3600);
 $minutes = floor(($sessionDuration % 3600) / 60);
@@ -39,14 +58,282 @@ if (isset($sessionInfo['nome']) && isset($sessionInfo['cognome'])) {
 }
 ?>
 
-<!-- Header Orizzontale Professionale -->
+<!-- Header Styles -->
+<style>
+/* Header principale */
+.main-header {
+    background: white;
+    border-bottom: 1px solid var(--gray-200);
+    padding: 0.75rem 1.5rem;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    position: sticky;
+    top: 0;
+    z-index: 100;
+    box-shadow: 0 1px 3px rgba(0,0,0,0.05);
+}
+
+.header-left {
+    display: flex;
+    align-items: center;
+    gap: 1rem;
+    flex-shrink: 0;
+}
+
+.header-right {
+    display: flex;
+    align-items: center;
+    gap: 1.5rem;
+    margin-left: auto;
+}
+
+/* Mobile menu button */
+.mobile-menu-btn {
+    display: none;
+    width: 36px;
+    height: 36px;
+    padding: 0;
+    border: 1px solid var(--gray-300);
+    background: white;
+    color: var(--gray-700);
+    cursor: pointer;
+    border-radius: var(--border-radius-md);
+    align-items: center;
+    justify-content: center;
+    transition: all 0.2s;
+}
+
+.mobile-menu-btn:hover {
+    background: var(--gray-100);
+    border-color: var(--gray-400);
+}
+
+/* Page Title */
+.page-title-section {
+    display: flex;
+    flex-direction: column;
+    gap: 0.125rem;
+}
+
+.page-title {
+    font-size: 1.25rem;
+    font-weight: 600;
+    color: var(--gray-800);
+    margin: 0;
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+}
+
+.page-icon {
+    font-size: 1.5rem;
+}
+
+.page-subtitle {
+    font-size: 0.875rem;
+    color: var(--gray-500);
+    margin: 0;
+}
+
+/* Timer */
+.work-timer {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    padding: 0.375rem 0.75rem;
+    background: var(--gray-50);
+    border-radius: var(--border-radius-md);
+    font-size: 0.875rem;
+    border: 1px solid var(--gray-200);
+}
+
+.timer-icon {
+    color: var(--primary-green);
+}
+
+.timer-text {
+    font-weight: 600;
+    font-family: var(--font-mono);
+    color: var(--primary-green);
+}
+
+.timer-label {
+    color: var(--gray-500);
+}
+
+/* User Menu */
+.user-menu {
+    position: relative;
+}
+
+.user-menu-btn {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    padding: 0.375rem 0.75rem;
+    border: none;
+    background: transparent;
+    cursor: pointer;
+    border-radius: var(--border-radius-md);
+    transition: all 0.2s;
+}
+
+.user-menu-btn:hover {
+    background: var(--gray-100);
+}
+
+.user-avatar {
+    width: 32px;
+    height: 32px;
+    background: var(--primary-green);
+    color: white;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 0.875rem;
+    font-weight: 600;
+}
+
+.user-name {
+    font-size: 0.875rem;
+    color: var(--gray-700);
+    font-weight: 500;
+}
+
+.chevron-icon {
+    color: var(--gray-500);
+    transition: transform 0.2s;
+}
+
+.user-menu-btn[aria-expanded="true"] .chevron-icon {
+    transform: rotate(180deg);
+}
+
+/* Dropdown */
+.user-dropdown {
+    position: absolute;
+    top: 100%;
+    right: 0;
+    margin-top: 0.5rem;
+    width: 240px;
+    background: white;
+    border: 1px solid var(--gray-200);
+    border-radius: var(--border-radius-lg);
+    box-shadow: var(--shadow-lg);
+    opacity: 0;
+    visibility: hidden;
+    transform: translateY(-10px);
+    transition: all 0.2s;
+    z-index: 1000;
+}
+
+.user-dropdown.show {
+    opacity: 1;
+    visibility: visible;
+    transform: translateY(0);
+}
+
+.dropdown-header {
+    padding: 1rem;
+    border-bottom: 1px solid var(--gray-200);
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+}
+
+.user-avatar-large {
+    width: 40px;
+    height: 40px;
+    background: var(--primary-green);
+    color: white;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-weight: 600;
+}
+
+.user-info {
+    flex: 1;
+}
+
+.user-fullname {
+    font-weight: 600;
+    color: var(--gray-800);
+    font-size: 0.875rem;
+}
+
+.user-role {
+    font-size: 0.75rem;
+    color: var(--gray-500);
+}
+
+.dropdown-menu {
+    padding: 0.5rem;
+}
+
+.dropdown-item {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    padding: 0.5rem 0.75rem;
+    color: var(--gray-700);
+    text-decoration: none;
+    border-radius: var(--border-radius-md);
+    font-size: 0.875rem;
+    transition: all 0.2s;
+}
+
+.dropdown-item:hover {
+    background: var(--gray-100);
+    color: var(--gray-900);
+}
+
+.dropdown-icon {
+    font-size: 1rem;
+}
+
+.dropdown-divider {
+    height: 1px;
+    background: var(--gray-200);
+    margin: 0.5rem 0;
+}
+
+/* Responsive */
+@media (max-width: 768px) {
+    .mobile-menu-btn {
+        display: flex;
+    }
+    
+    .header-left {
+        gap: 0.5rem;
+    }
+    
+    .header-right {
+        gap: 0.75rem;
+    }
+    
+    .user-name,
+    .timer-label {
+        display: none;
+    }
+    
+    .page-title {
+        font-size: 1.125rem;
+    }
+}
+</style>
+
+<!-- Header Orizzontale -->
 <header class="main-header">
     <div class="header-left">
-        <!-- Toggle Sidebar Mobile -->
-        <button class="sidebar-toggle" id="sidebarToggle" aria-label="Toggle sidebar">
-            <svg width="20" height="20" viewBox="0 0 20 20" fill="none">
-                <path d="M3 5h14M3 10h14M3 15h14" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
-            </svg>
+        <!-- Mobile Menu Button -->
+        <button class="mobile-menu-btn" 
+                id="mobileMenuBtn" 
+                aria-label="Menu mobile">
+            <span style="font-size: 18px;">☰</span>
         </button>
         
         <!-- Titolo Pagina -->
@@ -72,17 +359,9 @@ if (isset($sessionInfo['nome']) && isset($sessionInfo['cognome'])) {
             <span class="timer-label">/ 8h</span>
         </div>
         
-        <!-- Notifiche (placeholder) -->
-        <button class="header-btn notification-btn" aria-label="Notifiche">
-            <svg width="20" height="20" viewBox="0 0 20 20" fill="none">
-                <path d="M10 2a6 6 0 00-6 6v3.586l-.707.707A1 1 0 004 14h12a1 1 0 00.707-1.707L16 11.586V8a6 6 0 00-6-6zM10 18a3 3 0 01-3-3h6a3 3 0 01-3 3z" fill="currentColor"/>
-            </svg>
-            <span class="notification-dot"></span>
-        </button>
-        
         <!-- User Menu -->
         <div class="user-menu" id="userMenu">
-            <button class="user-menu-btn" aria-label="Menu utente">
+            <button class="user-menu-btn" id="userMenuBtn" aria-expanded="false">
                 <div class="user-avatar">
                     <?= $userInitials ?>
                 </div>
@@ -102,75 +381,91 @@ if (isset($sessionInfo['nome']) && isset($sessionInfo['cognome'])) {
                     </div>
                 </div>
                 
-                <div class="dropdown-divider"></div>
-                
-                <a href="/crm/?action=profile" class="dropdown-item">
-                    <span class="dropdown-icon">👤</span>
-                    Il mio profilo
-                </a>
-                
-                <a href="/crm/?action=settings" class="dropdown-item">
-                    <span class="dropdown-icon">⚙️</span>
-                    Impostazioni
-                </a>
-                
-                <div class="dropdown-divider"></div>
-                
-                <a href="/crm/logout.php" class="dropdown-item dropdown-logout">
-                    <span class="dropdown-icon">🚪</span>
-                    Esci
-                </a>
+                <div class="dropdown-menu">
+                    <a href="/crm/?action=profilo" class="dropdown-item">
+                        <span class="dropdown-icon">👤</span>
+                        Il mio profilo
+                    </a>
+                    <?php if ($sessionInfo['is_admin']): ?>
+                    <a href="/crm/?action=impostazioni" class="dropdown-item">
+                        <span class="dropdown-icon">⚙️</span>
+                        Impostazioni
+                    </a>
+                    <?php endif; ?>
+                    
+                    <div class="dropdown-divider"></div>
+                    
+                    <a href="/crm/auth/logout.php" class="dropdown-item">
+                        <span class="dropdown-icon">🚪</span>
+                        Esci
+                    </a>
+                </div>
             </div>
         </div>
     </div>
 </header>
 
-
-
+<!-- JavaScript per Header -->
 <script>
-// Timer aggiornamento real-time
-(function() {
-    const timerElement = document.getElementById('workTimer');
-    if (!timerElement) return;
+// Timer aggiornamento
+function updateTimer() {
+    const timerEl = document.getElementById('workTimer');
+    if (!timerEl) return;
     
-    let seconds = <?= $sessionDuration ?>;
+    const startTime = <?= $sessionStart * 1000 ?>;
+    const now = Date.now();
+    const elapsed = Math.floor((now - startTime) / 1000);
     
-    setInterval(() => {
-        seconds++;
-        const h = Math.floor(seconds / 3600);
-        const m = Math.floor((seconds % 3600) / 60);
-        const s = seconds % 60;
-        
-        timerElement.textContent = 
-            String(h).padStart(2, '0') + ':' +
-            String(m).padStart(2, '0') + ':' +
-            String(s).padStart(2, '0');
-    }, 1000);
-})();
+    const hours = Math.floor(elapsed / 3600);
+    const minutes = Math.floor((elapsed % 3600) / 60);
+    const seconds = elapsed % 60;
+    
+    timerEl.textContent = 
+        String(hours).padStart(2, '0') + ':' +
+        String(minutes).padStart(2, '0') + ':' +
+        String(seconds).padStart(2, '0');
+}
 
-// User dropdown toggle
+// Aggiorna timer ogni secondo
+setInterval(updateTimer, 1000);
+
+// Gestione User Menu Dropdown
 document.addEventListener('DOMContentLoaded', function() {
-    const userMenuBtn = document.querySelector('.user-menu-btn');
-    const userMenu = document.getElementById('userMenu');
+    const menuBtn = document.getElementById('userMenuBtn');
+    const dropdown = document.getElementById('userDropdown');
     
-    if (userMenuBtn) {
-        userMenuBtn.addEventListener('click', function(e) {
+    if (menuBtn && dropdown) {
+        // Toggle menu
+        menuBtn.addEventListener('click', function(e) {
             e.stopPropagation();
-            userMenu.classList.toggle('active');
+            const isOpen = dropdown.classList.contains('show');
+            
+            if (isOpen) {
+                dropdown.classList.remove('show');
+                menuBtn.setAttribute('aria-expanded', 'false');
+            } else {
+                dropdown.classList.add('show');
+                menuBtn.setAttribute('aria-expanded', 'true');
+            }
+        });
+        
+        // Chiudi cliccando fuori
+        document.addEventListener('click', function(e) {
+            if (!menuBtn.contains(e.target) && !dropdown.contains(e.target)) {
+                dropdown.classList.remove('show');
+                menuBtn.setAttribute('aria-expanded', 'false');
+            }
         });
     }
     
-    // Chiudi dropdown cliccando fuori
-    document.addEventListener('click', function() {
-        userMenu?.classList.remove('active');
-    });
-    
-    // Toggle sidebar mobile
-    const sidebarToggle = document.getElementById('sidebarToggle');
-    const sidebar = document.getElementById('mainSidebar');
-    
-    sidebarToggle?.addEventListener('click', function() {
-        sidebar?.classList.toggle('open');
-    });
+    // Mobile: hamburger menu  
+    const mobileMenuBtn = document.getElementById('mobileMenuBtn');
+    if (mobileMenuBtn) {
+        mobileMenuBtn.addEventListener('click', function() {
+            if (typeof window.toggleMobileSidebar === 'function') {
+                window.toggleMobileSidebar();
+            }
+        });
+    }
 });
 </script>

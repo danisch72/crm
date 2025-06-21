@@ -3,7 +3,7 @@
  * 📊 MODULO DASHBOARD OTTIMIZZATA - CRM RE.DE CONSULTING
  * File: /modules/dashboard/index.php
  * 
- * ✅ VERSIONE CON LAYOUT OTTIMIZZATO E PIÙ SPAZIO
+ * ✅ VERSIONE CON LAYOUT COMPATTO E PIÙ CONTENUTI
  */
 
 // ================================================================
@@ -275,15 +275,15 @@ function formatTimeAgo($dateString) {
             <main class="main-content">
                 <div class="container">
                     <!-- Welcome Section -->
-                    <div class="mb-4">
-                        <h1 class="text-2xl font-bold mb-2">Benvenuto, <?= htmlspecialchars($user['nome'] ?? 'Utente') ?>!</h1>
+                    <div class="mb-3">
+                        <h1 class="text-2xl font-bold">Benvenuto, <?= htmlspecialchars($user['nome'] ?? 'Utente') ?>!</h1>
                         <p class="text-muted">Ultimo aggiornamento: <?= $last_updated ?></p>
                     </div>
 
                     <!-- Stats Grid - 4 colonne -->
-                    <div class="row mb-4">
+                    <div class="row mb-3">
                         <?php foreach ($stats_cards as $stat): ?>
-                            <div class="col-md-3 mb-3">
+                            <div class="col-md-3 mb-2">
                                 <a href="<?= htmlspecialchars($stat['link']) ?>" class="text-decoration-none">
                                     <div class="stat-card">
                                         <div class="d-flex justify-content-between align-items-start mb-2">
@@ -329,7 +329,7 @@ function formatTimeAgo($dateString) {
                     <?php endif; ?>
 
                     <!-- Layout ottimizzato con griglia 2 colonne -->
-                    <div class="dashboard-grid" style="gap: 1.5rem; margin-top: 1.5rem;">
+                    <div class="dashboard-grid">
                         <!-- Colonna principale -->
                         <div>
                             <!-- Attività Recenti -->
